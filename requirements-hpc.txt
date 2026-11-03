@@ -1,0 +1,9 @@
+# 已於 CPython 3.13.0 / macOS CPU 驗證；Hazel Linux 安裝仍需 smoke test。
+# 建議先依 README 安裝官方 CPU wheel，避免下載未使用的 CUDA runtime。
+torch==2.8.0
+numpy==2.2.4
+pandas==2.2.3
+scipy==1.16.1
+scikit-learn==1.7.1
+matplotlib==3.10.7
+tqdm==4.67.1

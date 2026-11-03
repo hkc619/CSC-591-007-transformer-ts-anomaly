@@ -1,0 +1,32 @@
+"""Deployment CLI；正式設定鎖定 v2，smoke test 必須明確標示。"""
+import argparse
+
+parser=argparse.ArgumentParser(description='TranAD CPU float64 / protocol v2 deployment')
+parser.add_argument('--dataset',choices=['SMD'],default='SMD')
+parser.add_argument('--model',choices=['TranAD'],default='TranAD')
+parser.add_argument('--machine',default='machine-1-1')
+parser.add_argument('--train-machines',nargs='+')
+parser.add_argument('--test-machine')
+parser.add_argument('--epochs',type=int,default=5)
+parser.add_argument('--batch-size',type=int,default=128)
+parser.add_argument('--eval-batch-size',type=int,default=128)
+parser.add_argument('--seed',type=int,default=1)
+parser.add_argument('--protocol',choices=['v2'],default='v2')
+parser.add_argument('--source-only-pot',action='store_true',default=True)
+parser.add_argument('--progress',action='store_true')
+parser.add_argument('--retrain',action='store_true')
+parser.add_argument('--test',action='store_true')
+parser.add_argument('--less',action='store_true')
+parser.add_argument('--checkpoint')
+parser.add_argument('--output-dir',help='RESULTS_ROOT 內的可選父目錄')
+parser.add_argument('--project-root')
+parser.add_argument('--data-root')
+parser.add_argument('--results-root')
+parser.add_argument('--hpc',action='store_true',help='要求三個 roots 明確設定並彼此分離')
+parser.add_argument('--dry-run',action='store_true')
+parser.add_argument('--smoke-test',action='store_true',help='非正式短測試，允許減少 epochs/batch')
+args=parser.parse_args()
+if not args.smoke_test and (args.epochs,args.batch_size,args.eval_batch_size,args.seed)!=(5,128,128,1):
+    parser.error('正式 protocol 固定 epochs=5、batch=128、eval_batch=128、seed=1；短測試請明確加 --smoke-test')
+if min(args.epochs,args.batch_size,args.eval_batch_size)<1 or args.seed<0:
+    parser.error('epochs/batch 必須為正整數，seed 不可為負')

@@ -1,0 +1,32 @@
+{
+  "source_repository_path": "/Users/hkc619/Local File/School/2026 Fall/CSC 591 007/TranAD",
+  "source_git_commit": "46605a735909956cb27f35a912c3a2b764c54399",
+  "source_branch": "research/protocol-v2-smd28",
+  "source_dirty": true,
+  "tracked_status": " M AGENTS.md\n M MANUAL_TRAINING.md\n M main.py\n M plots/TranAD_SMD/output.pdf\n M plots/TranAD_SMD/training-graph.pdf\n M scripts/train.py\n M src/cross_machine.py\n M src/experiment.py\n M src/parser.py\n",
+  "untracked_formal_code": [
+    "src/training_protocol.py",
+    "scripts/validate_protocol_v2.py",
+    "scripts/validate_v2_artifacts.py",
+    "scripts/formal_experiments.py",
+    "scripts/analyze_formal_experiments.py"
+  ],
+  "protocol": "v2",
+  "creation_date": "2026-11-03T02:34:21.971383+00:00",
+  "source_sha256": {
+    "src/models.py": "42e8bdfa4ef1dced1683964f1f40712e70587d5b22ea2e7626e622d68932d314",
+    "src/dlutils.py": "82feb2d5457cc4d197b1f5f8db70cb212b6a32c99d0c2cbda1229d720c1cb6eb",
+    "src/pot.py": "83fd5dbd6e5c9f50840dc3ef891552c5bcf3691f403e294819260850c92bed46",
+    "src/spot.py": "7d68506d28421da21247e6ac76e9684ed1a687820426695fe3016416b68035bb",
+    "src/constants.py": "00f710d5ae8a4a5f14b9153abe6833f4eece52d8462d25522cfb8ebcf99735dc",
+    "src/utils.py": "f291196186ebf9e5df376da8596c8a56216bc850264abbc585bf7533efc40d3a",
+    "src/training_protocol.py": "4e44cd24902b8931443aae3f4b3619afc4c4264a92a7075bede8eb651c64b973",
+    "LICENSE": "4389d205c769d6edf92105fe2f4ac8cb8b8feabcef7baa359136dd3eec79cf12",
+    "main.py": "d2f8b115898ec1df49575242ce7d8976c58616dfb06348a009ccf1209970682b",
+    "preprocess.py": "8fa8fc949150cf6acaf067229492c93f82354d529a3e7b01a2861a155a080b22",
+    "src/cross_machine.py": "9fbec40a6f94a93a98f3a1998dce8a04284a86b8117f8084795e30aa98401138",
+    "src/experiment.py": "18f67be07d87053b22c80693ea491b72664f18d5ac2b4b602d25e459510e1d33",
+    "src/parser.py": "c93ec669fa003b16b4aa7813a4a885cc6f6afa93c8c665ef6820fef0023993dd",
+    "scripts/analyze_formal_experiments.py": "a9411b8a865ecf73e8ac1c0b4f457bca33511cb9b160c2b83aea86a02f26cf66"
+  }
+}

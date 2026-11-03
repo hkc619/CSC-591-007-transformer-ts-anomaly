@@ -1,0 +1,28 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+# macOS
+.DS_Store
+# Data
+data/
+processed/
+# Experiment outputs
+results/
+checkpoints/
+plots/
+*.log
+slurm-*.out
+hpc/logs/*.out
+hpc/logs/*.err
+# Large artifacts
+*.npz
+*.npy
+*.ckpt
+*.pdf
+# Local environment configuration
+.env
+hpc/env.sh
+# 保留既有研究筆記於本機，不納入此 deployment payload
+papers/
