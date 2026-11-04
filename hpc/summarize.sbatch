@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=tranad-summary
+#SBATCH --account=csc591f26_cpu
+#SBATCH --partition=compute_partners
+#SBATCH --qos=short
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
