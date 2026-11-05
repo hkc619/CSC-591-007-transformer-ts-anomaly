@@ -1,0 +1,18 @@
+{
+  "experiment": "target_threshold_calibration_v1",
+  "base_protocol": "v2",
+  "fractions": ["0.05", "0.10", "0.20"],
+  "slice": "target_train_prefix_floor",
+  "seed": 1,
+  "device": "cpu",
+  "dtype": "float64",
+  "window": 10,
+  "eval_batch_size": 128,
+  "optimizer_steps": 0,
+  "normalization_fitting": false,
+  "test_scores": "reuse_formal_cross_machine_artifacts",
+  "pot": {"q": 0.00001, "level": 0.99995, "multiplier": 1.06},
+  "auc_tolerance": 1e-12,
+  "output_namespace": "calibration",
+  "runtime_validation": "NOT EXECUTED — requires Hazel validation"
+}

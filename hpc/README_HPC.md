@@ -1,6 +1,9 @@
 # Hazel / Slurm 手動部署
 
-目前只建立與本機驗證 deployment，尚未 SSH Hazel 或提交任何 Slurm job。
+依使用者目前提供的進度，既有 RQ1 已完成 Hazel dry-run、1-epoch smoke、27→1 reproduction 與
+56 個 formal runs；本次沒有重新執行或驗證這些工作。新增的 RQ2 calibration 已完成程式實作及
+27 個 local synthetic tests；真實 SMD / Hazel calibration 仍為 PENDING HAZEL VALIDATION。
+以下原部署章節保留作為操作參考。
 Slurm 範本依 [NCSU Running Jobs](https://hpc.ncsu.edu/RunningJobs/RunningJobs.php)
 與 [Array Jobs](https://hpc.ncsu.edu/RunningJobs/Arrays.php) 的官方語法；實際 partition、account、
 可用 Python module 和額度需依使用者帳號確認，不假設固定 allocation。
@@ -86,3 +89,78 @@ sbatch --chdir="$PROJECT_ROOT" \
 
 若省略文件中的 `--output/--error`，Slurm 可能產生預設 `slurm-*.out` 在提交位置；因此正式
 提交務必使用外部 log 路徑。本 repository 的 hpc/logs/ 僅保留空白 placeholder。
+
+## 7. RQ2 Target threshold calibration：先單次 smoke
+
+完整 protocol、schema 與 static review 見 [CALIBRATION_PROTOCOL.md](../CALIBRATION_PROTOCOL.md)。
+Calibration 使用既有 cross-machine model、target TRAIN prefix 與同一 POT；不重新 training，
+重用正式 TEST scores。這是 lightweight target adaptation，不能改稱 zero-shot。
+
+本機已有 [synthetic smoke](../LOCAL_CALIBRATION_SMOKE.md)，可用
+`PYTHON_BIN=/path/to/python bash scripts/local_calibration_smoke.sh` 重跑；它不需要 SMD，
+不執行真實 POT，也不能代替 Hazel smoke。
+
+手動流程固定為：
+
+```text
+local Git review → user commit/push → Hazel git pull
+→ calibration manifest/config validation
+→ machine-1-1 5% dry-run
+→ machine-1-1 5% smoke
+→ inspect invariants → 使用者與 ChatGPT review → STOP
+
+只有確認 smoke 後：user approval → 84-task array → failure check → summary
+```
+
+本次只準備以下 scripts，沒有提交：
+
+| Script | Resource request |
+| --- | --- |
+| calibration_smoke.sbatch | 1 node、1 task、4 CPUs、8G、30 分鐘；machine-1-1 / 5% |
+| calibration_array.sbatch | 0-83%8；每 task 1 node、4 CPUs、8G、30 分鐘 |
+| calibration_summary.sbatch | 1 node、2 CPUs、4G、15 分鐘；要求 84 tasks 全部完成 |
+
+Account / partition / qos 使用 csc591f26_cpu / compute_partners / short；calibration requests 尚未實測。
+所有輸出位於 RESULTS_ROOT/calibration；原 formal scripts 與結果不變。
+
+使用者 push 後，在 Hazel 手動更新：
+
+```bash
+cd "$PROJECT_ROOT"
+git pull
+source hpc/env.sh
+export FORMAL_RESULTS_ROOT="${FORMAL_RESULTS_ROOT:-$RESULTS_ROOT}"
+mkdir -p "$RESULTS_ROOT/calibration/slurm-logs"
+```
+
+在適當 compute allocation 驗證 manifest/config 與 dry-run；本次 Codex 未執行：
+
+```bash
+"$PYTHON_BIN" scripts/build_calibration_manifest.py --hpc
+"$PYTHON_BIN" scripts/run_target_calibration.py \
+  --hpc --target machine-1-1 --fraction 0.05 --dry-run
+```
+
+接著由使用者只提交 smoke：
+
+```bash
+sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/calibration/slurm-logs/smoke-%j.out" \
+  --error="$RESULTS_ROOT/calibration/slurm-logs/smoke-%j.err" \
+  hpc/calibration_smoke.sbatch
+```
+
+檢查 status、smoke_summary、metadata、threshold、evaluation、validation：model hashes 不變、
+optimizer_steps=0、scores/labels/AUC 不變、POT stream_count=0、Raw metrics 產生且 formal inputs 不變。
+任何失敗先停止，不啟動 array。預設同 experiment 不重複寫；確定需重試時才明確加 --retry。
+
+未來完整實驗的 failed/missing checker 為：
+
+```bash
+"$PYTHON_BIN" scripts/find_failed_calibration_runs.py --hpc
+```
+
+只做 smoke 時，84 個正式 calibration tasks 尚未執行，checker 列出缺失是預期行為。
+Checker 不自動重試；summary 不接受失敗、missing 或 smoke rows。
+
+**STOP AFTER MACHINE-1-1 5% SMOKE。** 本章不提供立即提交完整 84-task array 的命令。
