@@ -1,0 +1,55 @@
+{
+  "repository": "https://github.com/thuml/Anomaly-Transformer",
+  "commit": "b0ee470c8012bff857fb600462aec6209c4a18d9",
+  "license": "MIT; see LICENSE",
+  "files": [
+    {
+      "path": "model/AnomalyTransformer.py",
+      "git_blob_sha": "ffcbdf2583a6c1b21342b95c1470bbcd49e6a959",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/model/AnomalyTransformer.py"
+    },
+    {
+      "path": "model/attn.py",
+      "git_blob_sha": "f6171fc0174235ce68b960107de890e8b2dc1d06",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/model/attn.py"
+    },
+    {
+      "path": "model/embed.py",
+      "git_blob_sha": "7a9b5321fe3c27c7aa18d594d4c1e03331cdb719",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/model/embed.py"
+    },
+    {
+      "path": "solver.py",
+      "git_blob_sha": "a9c057e8ceac206e8ba5ee0223d0e0c8cea7ed67",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/solver.py"
+    },
+    {
+      "path": "data_factory/data_loader.py",
+      "git_blob_sha": "4ce770d95f838b5c4572f2492fd7711091d97a04",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/data_factory/data_loader.py"
+    },
+    {
+      "path": "LICENSE",
+      "git_blob_sha": "6f6856e7421037b9d06cf954b9e63d32aeaac695",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/LICENSE"
+    },
+    {
+      "path": "main.py",
+      "git_blob_sha": "fd2e213ff9a1a01fe6720e6fb754dbc4231842d0",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/main.py"
+    },
+    {
+      "path": "scripts/SMD.sh",
+      "git_blob_sha": "e74a8ddc72c6115f0612e708237ed99a104a5942",
+      "url": "https://github.com/thuml/Anomaly-Transformer/blob/b0ee470c8012bff857fb600462aec6209c4a18d9/scripts/SMD.sh"
+    }
+  ],
+  "changes": [
+    "model imports renamed to .attention / .embedding",
+    "hard-coded CUDA distance tensors changed to nonpersistent device-following buffer",
+    "modern PyTorch circular Conv1d padding fixed at 1 (same native >=1.5 behavior)",
+    "official solver/loader not vendored: fixed epochs, no TEST validation, no scaler fitting, no threshold or PA",
+    "native minimax double backward and temperature-50 energy preserved",
+    "TEST tail retained with explicit right-aligned emission mapping"
+  ]
+}

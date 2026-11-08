@@ -164,3 +164,16 @@ optimizer_steps=0、scores/labels/AUC 不變、POT stream_count=0、Raw metrics 
 Checker 不自動重試；summary 不接受失敗、missing 或 smoke rows。
 
 **STOP AFTER MACHINE-1-1 5% SMOKE。** 本章不提供立即提交完整 84-task array 的命令。
+
+## 8. Anomaly Transformer secondary robustness
+
+新增獨立 6-target / 12-run ranking-only extension，正式設定、local test/dry-run 證據與兩個 GPU smoke
+指令見 [ANOMALY_TRANSFORMER_ROBUSTNESS.md](../ANOMALY_TRANSFORMER_ROBUSTNESS.md)。
+不使用 threshold、PA、POT/SPOT 或 calibration，不修改原 TranAD / calibration 結果。
+
+AT 需額外設定獨立 CUDA environment 的 `AT_PYTHON_BIN`，保留原 CPU `PYTHON_BIN`。
+範本為 csc591f26_gpu / gpu_partners / short_gpu / gpu:a100:1；本機無 hpc/env.sh，尚未驗證 private
+account associations、GPU environment 或實際 VRAM/runtime。不要 source CPU common.sh 清空 GPU。
+
+先只由使用者手動提交 machine-1-1 manifest tasks 0（per_machine）與 1（cross_machine），兩者均固定
+10 epochs、batch 256。兩個 smoke review 前，不提交其餘 tasks 2–11，也不啟動完整 summary。

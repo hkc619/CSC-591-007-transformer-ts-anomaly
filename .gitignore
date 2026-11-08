@@ -24,5 +24,6 @@ hpc/logs/*.err
 # Local environment configuration
 .env
 hpc/env.sh
+hpc/anomaly_transformer_env.sh
 # 保留既有研究筆記於本機，不納入此 deployment payload
 papers/

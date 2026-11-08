@@ -1,0 +1,4 @@
+# 先 source 既有 hpc/env.sh，再設定；本檔只是 example，不含使用者私有 paths。
+export AT_PYTHON_BIN=/path/to/separate-cuda-python-environment/bin/python
+# 在 Hazel 確認可用的 account / partition / QOS / typed GPU 後再提交。
+# 原 PYTHON_BIN 與 CPU environment 保持原樣；不自動安裝或降級套件。
