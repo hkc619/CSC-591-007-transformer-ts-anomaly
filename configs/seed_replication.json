@@ -1,0 +1,20 @@
+{
+  "experiment": "tranad_seed_replication_v1",
+  "base_protocol": "v2",
+  "reference_seed": 1,
+  "new_seeds": [2, 3],
+  "analysis_seeds": [1, 2, 3],
+  "namespace": "seed-replication",
+  "model": "TranAD",
+  "dataset": "SMD",
+  "epochs": 5,
+  "batch_size": 128,
+  "eval_batch_size": 128,
+  "window": 10,
+  "learning_rate": 0.0001,
+  "device": "cpu",
+  "dtype": "float64",
+  "training_shuffle": true,
+  "sampling": "natural_source_size",
+  "calibration_included": false
+}

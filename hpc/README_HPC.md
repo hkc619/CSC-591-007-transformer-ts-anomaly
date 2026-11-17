@@ -177,3 +177,15 @@ account associations、GPU environment 或實際 VRAM/runtime。不要 source CP
 
 先只由使用者手動提交 machine-1-1 manifest tasks 0（per_machine）與 1（cross_machine），兩者均固定
 10 epochs、batch 256。兩個 smoke review 前，不提交其餘 tasks 2–11，也不啟動完整 summary。
+
+## TranAD 多 seed 補強（原結果不覆寫）
+
+新增 seed=2、3 各 56 runs；原 seed=1 的 runs、checkpoints、summaries、圖檔均唯讀保留。
+新入口與所有新 artifacts 位於獨立 `seed-replication/`，不修改原 formal / calibration / AT scripts。
+先執行 preflight dry-runs，再由使用者手動提交 array；本次沒有自動提交 jobs。
+
+- `hpc/seed_replication_preflight.sbatch`：四個 dry-runs，不訓練。
+- `hpc/seed_replication_array.sbatch`：112 tasks，`0-111%4`，CPU float64。
+- `hpc/seed_replication_summary.sbatch`：讀取 seeds=1,2,3，另存新 CSV / PNG / PDF。
+
+完整輸出保護、retry 與命令見 [SEED_REPLICATION_HPC.md](../SEED_REPLICATION_HPC.md)。
