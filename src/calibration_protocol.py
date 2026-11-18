@@ -66,24 +66,39 @@ def load_configuration(project):
     return config, machines
 
 
-def manifest_rows(machines):
-    return [dict(task_id=str(i * 3 + j), target=machine, fraction=fraction, seed="1")
-            for i, machine in enumerate(machines)
-            for j, fraction in enumerate(FRACTIONS)]
+def canonical_seeds(seeds):
+    values = [int(seed) for seed in seeds]
+    if not values or len(set(values)) != len(values) or any(seed < 0 or seed >= 2**32 for seed in values):
+        raise ValueError("seeds 必須為不重複的非負整數")
+    return tuple(sorted(values))
 
 
-def validate_manifest(path, machines):
+def manifest_rows(machines, seeds=(1,)):
+    return [dict(task_id=str(k * len(machines) * 3 + i * 3 + j), target=machine,
+                 fraction=fraction, seed=str(seed))
+            for k, seed in enumerate(canonical_seeds(seeds))
+            for i, machine in enumerate(machines) for j, fraction in enumerate(FRACTIONS)]
+
+
+def manifest_seeds(path):
+    with Path(path).open(newline="") as stream:
+        values = {int(row["seed"]) for row in csv.DictReader(stream)}
+    return canonical_seeds(values)
+
+
+def validate_manifest(path, machines, seeds=(1,)):
     with Path(path).open(newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames != FIELDS:
             raise ValueError("calibration manifest 欄位或順序錯誤")
         rows = list(reader)
-    if rows != manifest_rows(machines) or len(rows) != 84:
-        raise ValueError("manifest 必須精確等於 28 targets × 3 fractions 的 84 tasks")
+    expected = manifest_rows(machines, seeds)
+    if rows != expected:
+        raise ValueError(f"manifest 必須精確等於 28 targets × 3 fractions × {len(canonical_seeds(seeds))} seeds 的 {len(expected)} tasks")
     return rows
 
 
-def calibration_directory(results, formal_root):
+def calibration_directory(results, formal_root, seed=1):
     """只允許新 namespace；不得覆蓋 formal 輸入目錄或其祖先。"""
     results, formal_root = Path(results).resolve(), Path(formal_root).resolve()
     if (results / "calibration").is_symlink():
@@ -101,4 +116,11 @@ def calibration_directory(results, formal_root):
         path = path.resolve()
         if output == path or output.is_relative_to(path) or path.is_relative_to(output):
             raise ValueError("calibration output 與 formal artifacts 重疊")
+    if int(seed) != 1:
+        output = output / "seed-replication"
+        if output.is_symlink() or output.resolve() != output:
+            raise ValueError("多 seed calibration namespace 不接受 symlink")
+        for child in ("runs", "task_status", "summaries", "cache", "slurm-logs"):
+            if (output / child).is_symlink():
+                raise ValueError("多 seed calibration 子目錄不接受 symlink")
     return output

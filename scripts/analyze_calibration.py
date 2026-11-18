@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from src.calibration_analysis import summarize_run, write_outputs
 from src.calibration_artifacts import failed_calibration_tasks
-from src.calibration_protocol import calibration_directory, load_configuration, validate_manifest
+from src.calibration_protocol import calibration_directory, canonical_seeds, load_configuration, validate_manifest
 from src.paths import overlaps, resolve_roots
 
 
@@ -19,6 +19,8 @@ def main():
     for name in ("project-root", "data-root", "results-root", "formal-results-root"):
         parser.add_argument("--" + name)
     parser.add_argument("--hpc", action="store_true")
+    parser.add_argument("--seeds", type=int, nargs="+", default=[1],
+                        help="舊單 seed 預設 1；新合併報告使用 --seeds 1 2 3")
     args = parser.parse_args()
     roots = resolve_roots(args)
     formal = Path(args.formal_results_root or os.environ.get("FORMAL_RESULTS_ROOT") or roots.results).expanduser().resolve()
@@ -26,6 +28,12 @@ def main():
         raise ValueError("formal root 不能位於 code / data")
     namespace = calibration_directory(roots.results, formal)
     config, machines = load_configuration(roots.project)
+    seeds = canonical_seeds(args.seeds)
+    if seeds != (1,):
+        from src.calibration_multiseed import analyze_multiseed
+        folder = analyze_multiseed(roots, formal, config, machines, seeds)
+        print("Multi-seed calibration summary：", folder)
+        return
     rows = validate_manifest(roots.project / "configs/calibration_runs.csv", machines)
     failures, statuses = failed_calibration_tasks(namespace, rows)
     if failures["count"]:

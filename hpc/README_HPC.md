@@ -189,3 +189,13 @@ account associations、GPU environment 或實際 VRAM/runtime。不要 source CP
 - `hpc/seed_replication_summary.sbatch`：讀取 seeds=1,2,3，另存新 CSV / PNG / PDF。
 
 完整輸出保護、retry 與命令見 [SEED_REPLICATION_HPC.md](../SEED_REPLICATION_HPC.md)。
+
+## RQ2 Calibration 擴充至 Seeds 2 / 3
+
+新 manifest 為 `configs/calibration_runs_seed23.csv`（168 tasks），不重跑 seed=1。
+同 seed 的 formal checkpoint / TEST artifacts 由 canonical seed-replication mapping 核對，
+新輸出位於 `calibration/seed-replication/`；舊 seed=1 calibration artifacts 唯讀保留。
+先用 `--seed 2` 完成 machine-1-1 / 5% dry-run 與 smoke，再手動使用
+`CALIBRATION_MANIFEST=... --array=0-167%8` 提交新 tasks。
+三 seed 分析入口為 `scripts/analyze_calibration.py --hpc --seeds 1 2 3`。
+完整指令、RNG 定義、路徑假設與驗證限制見 [CALIBRATION_MULTI_SEED_HPC.md](../CALIBRATION_MULTI_SEED_HPC.md)。

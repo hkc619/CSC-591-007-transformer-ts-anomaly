@@ -13,7 +13,7 @@ from time import perf_counter
 
 import numpy as np
 
-from src.calibration_protocol import calibration_directory, canonical_fraction, prefix_length
+from src.calibration_protocol import calibration_directory, canonical_fraction, prefix_length, manifest_rows
 from src.calibration_artifacts import new_attempt
 
 
@@ -42,8 +42,12 @@ def array_hash(array):
     return digest.hexdigest()
 
 
-def select_formal_run(formal_root, machines, target):
+def select_formal_run(formal_root, machines, target, seed=1):
     """與正式 summary 一樣採最近 attempt；失敗時不靜默回退舊 checkpoint。"""
+    if seed != 1:
+        from src.calibration_formal import seed_formal_run
+        run, status, _, _ = seed_formal_run(Path(__file__).resolve().parents[1], formal_root, target, seed)
+        return run, status
     task_id = 28 + machines.index(target)
     candidates = []
     for path in (formal_root / "task_status").glob("*.json"):
@@ -61,7 +65,16 @@ def select_formal_run(formal_root, machines, target):
     return run, status_path
 
 
-def validate_formal_bundle(project, formal_root, run, target, machines):
+def validate_formal_bundle(project, formal_root, run, target, machines, seed=1):
+    run_root = Path(formal_root).resolve()
+    extra_paths = {}
+    if seed != 1:
+        from src.calibration_formal import seed_formal_run
+        selected, status_path, row, attempt = seed_formal_run(project, formal_root, target, seed)
+        if selected != run:
+            raise ValueError("formal run 不符合此 target / seed mapping")
+        run_root = attempt
+        extra_paths = dict(formal_launch=attempt / "launch.json", formal_worker=attempt / "worker_start.json")
     paths = {name: run / name for name in
              ("metadata.json", "evaluation.json", "threshold.json", "scores.npz")}
     for path in paths.values():
@@ -69,7 +82,7 @@ def validate_formal_bundle(project, formal_root, run, target, machines):
             raise ValueError(f"缺少 formal artifact 或連結指向 run 外：{path}")
     meta = read_json(paths["metadata.json"])
     fixed = dict(setting="cross_machine_zero_shot", target_machine=target,
-                 protocol="v2", seed=1, epochs=5, batch_size=128, eval_batch_size=128,
+                 protocol="v2", seed=seed, epochs=5, batch_size=128, eval_batch_size=128,
                  device="cpu", dtype="float64", window=10, learning_rate=0.0001,
                  training_shuffle=True, smoke_test=False,
                  threshold_source="source_machine_training_scores",
@@ -115,9 +128,9 @@ def validate_formal_bundle(project, formal_root, run, target, machines):
     if not np.isfinite(threshold) or baseline["threshold"] != threshold or threshold_info["threshold_value"] != threshold:
         raise ValueError("formal threshold artifacts 不一致")
     checkpoint = Path(meta["checkpoint"]).resolve()
-    expected_checkpoint = (formal_root / "checkpoints" / run.name / "model.ckpt").resolve()
+    expected_checkpoint = run_root / "checkpoints" / run.name / "model.ckpt"
     if (checkpoint != expected_checkpoint or not checkpoint.is_file()
-            or not checkpoint.is_relative_to((formal_root / "checkpoints").resolve())):
+            or not checkpoint.is_relative_to((run_root / "checkpoints").resolve())):
         raise ValueError("checkpoint 必須為同一 formal run 的既有 model.ckpt；不自動 remap paths")
     paths["checkpoint"] = checkpoint
     # 使用已訓練 checkpoint；阻止目前 inference implementation 與 formal snapshot 不同。
@@ -128,6 +141,7 @@ def validate_formal_bundle(project, formal_root, run, target, machines):
         if not snapshot.is_file() or file_hash(snapshot) != file_hash(project / name):
             raise ValueError(f"與 formal snapshot 的 implementation 不一致：{name}")
         paths["source/" + name] = snapshot
+    paths.update(extra_paths)
     return meta, baseline, paths
 
 
@@ -189,15 +203,18 @@ def check_baseline_metrics(expected, actual, tolerance):
                                        rtol=0, atol=tolerance, equal_nan=False)
 
 
-def inspect_experiment(roots, formal_root, config, machines, target, fraction):
+def inspect_experiment(roots, formal_root, config, machines, target, fraction, seed=1):
     if target not in machines:
         raise ValueError("target 不在固定 28-machine list")
-    output = calibration_directory(roots.results, formal_root)
-    run, status_path = select_formal_run(formal_root, machines, target)
-    meta, baseline, paths = validate_formal_bundle(roots.project, formal_root, run, target, machines)
+    output = calibration_directory(roots.results, formal_root, seed)
+    run, status_path = select_formal_run(formal_root, machines, target, seed)
+    meta, baseline, paths = validate_formal_bundle(roots.project, formal_root, run, target, machines, seed)
     paths["formal_status"] = status_path
     train_path = roots.data / "train" / (target + ".txt")
     selection = inspect_prefix(train_path, fraction)
+    formal_task = len(machines) + machines.index(target)
+    if seed != 1:
+        formal_task = int(read_json(status_path)["task_id"])
     description = dict(experiment=config["experiment"], base_protocol="v2", target_machine=target,
                        experiment_type="target_threshold_calibration", target=target,
                        fraction=float(canonical_fraction(fraction)), fraction_key=canonical_fraction(fraction),
@@ -207,13 +224,14 @@ def inspect_experiment(roots, formal_root, config, machines, target, fraction):
                        test_points=meta["test_timestamps"],
                        calibration_raw_points=selection["prefix_length"],
                        calibration_windows=selection["prefix_length"],
-                       formal_task_id=len(machines) + machines.index(target), formal_run_id=run.name,
+                       formal_task_id=formal_task, formal_base_task_id=len(machines) + machines.index(target),
+                       formal_seed=seed, calibration_rng_seed=1, formal_run_id=run.name,
                        formal_checkpoint=str(paths["checkpoint"]),
                        formal_score_artifact=str(paths["scores.npz"]),
                        formal_evaluation_artifact=str(paths["evaluation.json"]),
                        formal_run=str(run), checkpoint=str(paths["checkpoint"]),
                        output_namespace=str(output), threshold_source="target_train_prefix_scores",
-                       pot=config["pot"], device="cpu", dtype="float64", seed=1,
+                       pot=config["pot"], device="cpu", dtype="float64", seed=seed,
                        window=10, eval_batch_size=128,
                        window_size=10, protocol="v2", model="TranAD", dataset="SMD",
                        model_retrained=False, continuous_scores_reused=True,
@@ -262,15 +280,20 @@ class Tee:
 
 
 def execute_calibration(roots, formal_root, config, machines, target, fraction, smoke=False,
-                        task_id=None, command=None, retry=False):
+                        task_id=None, command=None, retry=False, seed=1, manifest_seed_values=None):
     if target not in machines:
         raise ValueError("target 不在固定 machine list")
-    namespace = calibration_directory(roots.results, formal_root)
-    expected_task = machines.index(target) * 3 + config["fractions"].index(canonical_fraction(fraction))
+    namespace = calibration_directory(roots.results, formal_root, seed)
+    values = manifest_seed_values or (seed,)
+    matching = [row for row in manifest_rows(machines, values) if int(row["seed"]) == seed
+                and row["target"] == target and row["fraction"] == canonical_fraction(fraction)]
+    if len(matching) != 1:
+        raise ValueError("seed / target / fraction 不在本次 manifest")
+    expected_task = int(matching[0]["task_id"])
     if task_id is not None and (task_id != expected_task or smoke):
         raise ValueError("calibration task ID / target / fraction / smoke 不一致")
-    logical_id, attempt_id, folder = new_attempt(namespace, target, fraction, smoke, retry)
-    status = dict(task_id=task_id, target=target, target_machine=target,
+    logical_id, attempt_id, folder = new_attempt(namespace, target, fraction, smoke, retry, seed)
+    status = dict(task_id=task_id, target=target, target_machine=target, seed=seed,
                   fraction=canonical_fraction(fraction), run_id=logical_id, attempt_id=attempt_id,
                   smoke_test=smoke, run_path=str(folder), exit_code=1, completed=False,
                   created_at=datetime.now(timezone.utc).isoformat())
@@ -291,7 +314,10 @@ def execute_calibration(roots, formal_root, config, machines, target, fraction, 
         print("Calibration run directory:", folder, flush=True)
         try:
             description, formal_meta, baseline, paths, train_path = inspect_experiment(
-                roots, formal_root, config, machines, target, fraction)
+                roots, formal_root, config, machines, target, fraction, seed)
+            print(f"Formal model seed={seed}; calibration/POT RNG seed=1", flush=True)
+            print("Formal checkpoint:", paths["checkpoint"], flush=True)
+            print("Formal TEST scores:", paths["scores.npz"], flush=True)
             protected = {key: file_hash(path) for key, path in paths.items()}
             _execute(folder, roots, config, description, formal_meta, baseline, paths,
                      protected, train_path, smoke)
@@ -320,7 +346,7 @@ def _execute(folder, roots, config, description, formal_meta, baseline, paths,
     random.seed(1)
     np.random.seed(1)
     torch.manual_seed(1)
-    write_json(folder / "config.json", config)
+    write_json(folder / "config.json", dict(config, seed=description["seed"], calibration_rng_seed=1))
     prefix = load_prefix(train_path, description["prefix"]["prefix_length"])
     prefix_digest = array_hash(prefix)
     start = perf_counter()
@@ -336,6 +362,10 @@ def _execute(folder, roots, config, description, formal_meta, baseline, paths,
         print("[3/4] TRAIN-prefix-only POT；TEST stream 為空", flush=True)
         np.random.seed(1)
         threshold, pot_info = fit_threshold(core, calibration_scores)
+        required_pot = dict(q=1e-5, requested_level=0.99995, multiplier=1.06,
+                            stream_score_count=0, source_score_count=len(prefix))
+        if any(pot_info.get(key) != value for key, value in required_pot.items()):
+            raise RuntimeError("calibration POT parameters / TRAIN count / empty TEST stream 不符")
         if state_hash(model) != before or model.training or any(p.requires_grad or p.grad is not None for p in model.parameters()):
             raise RuntimeError("model parameters / buffers / freeze state 改變")
         # 只有 threshold 固定後，才開啟原有 TEST score archive。
@@ -380,9 +410,12 @@ def _execute(folder, roots, config, description, formal_meta, baseline, paths,
                 ("torch", "numpy", "scipy", "scikit-learn", "pandas", "matplotlib", "tqdm")}
     calibration_source = {name: file_hash(roots.project / name) for name in (
         "src/calibration_protocol.py", "src/calibration_runtime.py", "src/target_calibration.py",
-        "src/calibration_artifacts.py",
+        "src/calibration_artifacts.py", "src/calibration_formal.py",
         "scripts/run_target_calibration.py", "configs/target_calibration.json",
         "configs/calibration_runs.csv")}
+    if description["seed"] != 1:
+        for name in ("configs/calibration_runs_seed23.csv", "configs/seed_replication_runs.csv"):
+            calibration_source[name] = file_hash(roots.project / name)
     metadata = dict(**description, setting="cross_machine_target_threshold_calibration",
                     smoke_test=smoke, base_setting="cross_machine_zero_shot",
                     base_run_id=Path(description["formal_run"]).name,
@@ -416,7 +449,9 @@ def _execute(folder, roots, config, description, formal_meta, baseline, paths,
     metadata.update(run_id=launch["run_id"], attempt_id=launch["attempt_id"],
                     git_commit=launch["deployment_git_commit"], git_commit_status=launch["git_commit_status"])
     write_json(folder / "metadata.json", metadata)
-    smoke_summary = dict(formal_run_id=metadata["formal_run_id"], formal_task_id=metadata["formal_task_id"],
+    smoke_summary = dict(seed=description["seed"], formal_seed=description["formal_seed"], calibration_rng_seed=1,
+        formal_score_artifact=description["formal_score_artifact"],
+        formal_run_id=metadata["formal_run_id"], formal_task_id=metadata["formal_task_id"],
         formal_checkpoint=metadata["formal_checkpoint"], target=metadata["target"], fraction=metadata["fraction"],
         target_train_total_raw_points=metadata["target_train_total_raw_points"],
         calibration_raw_points=len(prefix), calibration_windows=len(calibration_scores),

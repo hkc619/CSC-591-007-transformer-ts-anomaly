@@ -13,23 +13,43 @@ from src.target_calibration import (array_hash, check_auc_invariance, check_base
 
 def summarize_run(folder, row, config, namespace, machines):
     target, fraction = row["target"], row["fraction"]
-    folder = validate_attempt_path(namespace, folder, target, fraction)
+    seed = int(row["seed"])
+    folder = validate_attempt_path(namespace, folder, target, fraction, seed=seed)
     meta, evaluation = read_json(folder / "metadata.json"), read_json(folder / "evaluation.json")
     status, checks = read_json(folder / "status.json"), read_json(folder / "validation.json")
+    formal_task = len(machines) + machines.index(target)
+    if seed != 1:
+        from src.seed_replication import manifest
+        formal_rows = manifest(Path(__file__).resolve().parents[1])
+        formal_task = int(next(r["task_id"] for r in formal_rows if int(r["seed"]) == seed
+                              and r["target_machine"] == target and r["setting"] == "cross_machine_zero_shot"))
     expected = dict(experiment_type="target_threshold_calibration", base_protocol="v2",
-        target=target, seed=1, model="TranAD", dataset="SMD", device="cpu", dtype="float64",
+        target=target, seed=seed, model="TranAD", dataset="SMD", device="cpu", dtype="float64",
         model_retrained=False, optimizer_steps=0, parameters_unchanged=True,
         model_frozen=True, continuous_scores_reused=True, normalization_fitted=False,
         test_inference_executed=False, target_test_used_for_threshold=False,
         target_train_used_for_training=False, calibration_source="target_train_temporal_prefix",
         threshold_source="target_train_prefix_scores", window_size=10, eval_batch_size=128,
-        formal_task_id=len(machines) + machines.index(target))
+        formal_task_id=formal_task)
     if any(meta.get(key) != value for key, value in expected.items()):
         raise ValueError("calibration metadata 不符合固定 protocol / target / frozen design")
     if canonical_fraction(meta["fraction"]) != fraction or status["task_id"] != int(row["task_id"]):
         raise ValueError("fraction / task ID 與 manifest 不同")
     if not status["completed"] or status["exit_code"] != 0 or meta["smoke_test"]:
         raise ValueError("不接受失敗、未完成或 smoke 結果")
+    if status.get("seed", 1) != seed or meta.get("calibration_rng_seed", 1) != 1:
+        raise ValueError("calibration seed / 固定 RNG 不符")
+    original_meta = read_json(meta["input_paths"]["metadata.json"])
+    if (original_meta.get("seed") != seed or original_meta.get("target_machine") != target
+            or original_meta.get("setting") != "cross_machine_zero_shot"):
+        raise ValueError("formal metadata 與 calibration target/seed 不符")
+    if seed != 1:
+        worker = read_json(meta["input_paths"]["formal_worker"])
+        if worker["effective_args"]["seed"] != seed or int(worker["row"]["task_id"]) != formal_task:
+            raise ValueError("formal worker 指向其他 seed/task")
+    for alias, key in (("formal_checkpoint", "checkpoint"), ("formal_score_artifact", "scores.npz")):
+        if Path(meta[alias]).resolve() != Path(meta["input_paths"][key]).resolve():
+            raise ValueError("formal checkpoint / TEST artifact path aliases 不一致")
     expected_pot = dict(q=1e-5, requested_level=0.99995, multiplier=1.06, stream_score_count=0)
     if any(meta["pot"].get(key) != value for key, value in expected_pot.items()):
         raise ValueError("calibration POT 參數或 test-stream isolation 不符")
@@ -92,7 +112,7 @@ def summarize_run(folder, row, config, namespace, machines):
     threshold = read_json(folder / "threshold.json")
     if any(threshold.get(key) != value for key, value in changes.items()):
         raise ValueError("threshold shifts / ratio 不一致")
-    result = dict(target=target, group=int(target.split("-")[1]), fraction=float(fraction), seed=1,
+    result = dict(target=target, group=int(target.split("-")[1]), fraction=float(fraction), seed=seed,
                   calibration_raw_points=length, calibration_windows=length,
                   target_train_total_raw_points=meta["target_train_total_raw_points"],
                   **changes, **recovery, formal_run_id=meta["formal_run_id"],

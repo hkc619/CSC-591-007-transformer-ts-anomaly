@@ -10,8 +10,12 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --time=00:30:00
+#SBATCH --open-mode=append
 set -euo pipefail
 source "${PROJECT_ROOT:?請設定 PROJECT_ROOT}/hpc/calibration_common.sh"
 : "${SLURM_ARRAY_TASK_ID:?需要 Slurm array task ID}"
+for option in "$@"; do
+  [[ "$option" == "--retry" ]] || { echo "僅接受 --retry" >&2; exit 2; }
+done
 "$PYTHON_BIN" -u scripts/run_target_calibration.py --hpc \
-  --manifest configs/calibration_runs.csv --task-id "$SLURM_ARRAY_TASK_ID"
+  --manifest "${CALIBRATION_MANIFEST:-configs/calibration_runs.csv}" --task-id "$SLURM_ARRAY_TASK_ID" "$@"

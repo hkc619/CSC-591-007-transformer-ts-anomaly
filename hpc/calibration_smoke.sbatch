@@ -8,7 +8,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --time=00:30:00
+#SBATCH --open-mode=append
 set -euo pipefail
 source "${PROJECT_ROOT:?請設定 PROJECT_ROOT}/hpc/calibration_common.sh"
 "$PYTHON_BIN" -u scripts/run_target_calibration.py \
-  --hpc --target machine-1-1 --fraction 0.05 --smoke-test
+  --hpc --target machine-1-1 --fraction 0.05 --seed "${CALIBRATION_SEED:-1}" --smoke-test

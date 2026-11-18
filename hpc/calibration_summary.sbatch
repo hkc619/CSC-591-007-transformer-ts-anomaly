@@ -9,6 +9,8 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
 #SBATCH --time=00:15:00
+#SBATCH --open-mode=append
 set -euo pipefail
 source "${PROJECT_ROOT:?請設定 PROJECT_ROOT}/hpc/calibration_common.sh"
-"$PYTHON_BIN" -u scripts/analyze_calibration.py --hpc
+read -r -a calibration_seeds <<< "${CALIBRATION_SEEDS:-1}"
+"$PYTHON_BIN" -u scripts/analyze_calibration.py --hpc --seeds "${calibration_seeds[@]}"
