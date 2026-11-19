@@ -1,5 +1,14 @@
 # Hazel / Slurm 手動部署
 
+## Universal training Stage 1（最新獨立入口）
+
+只使用全部 28 台 SMD TRAIN、沿用原 TranAD protocol-v2，完成一個 seed-1 checkpoint 與 reload 驗證。
+不執行 TEST、POT 或 calibration，也不修改下列既有實驗入口。新輸出只在 `RESULTS_ROOT/universal/`。
+完整 provenance、TRAIN counts、本機測試與單一 CPU sbatch 指令見
+[UNIVERSAL_TRAINING_STAGE1.md](../UNIVERSAL_TRAINING_STAGE1.md)。
+先手動 dry-run，再由使用者決定提交 `hpc/universal_train.sbatch`；本次未提交。
+Stage 1 停在 checkpoint review，不啟動 seeds 2/3 或 universal evaluation。
+
 依使用者目前提供的進度，既有 RQ1 已完成 Hazel dry-run、1-epoch smoke、27→1 reproduction 與
 56 個 formal runs；本次沒有重新執行或驗證這些工作。新增的 RQ2 calibration 已完成程式實作及
 27 個 local synthetic tests；真實 SMD / Hazel calibration 仍為 PENDING HAZEL VALIDATION。

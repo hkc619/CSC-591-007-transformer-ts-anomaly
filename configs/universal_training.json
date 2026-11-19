@@ -1,0 +1,10 @@
+{
+  "experiment": "universal_train_only_v1",
+  "protocol_source": "configs/formal_protocol_v2.json",
+  "namespace": "universal",
+  "allowed_seeds": [1, 2, 3],
+  "stage1_validation_seed": 1,
+  "test_evaluation": false,
+  "threshold_fitting": false,
+  "calibration": false
+}
