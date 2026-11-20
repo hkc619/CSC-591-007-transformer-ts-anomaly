@@ -1,5 +1,226 @@
 # Hazel / Slurm 手動部署
 
+## Universal Stage 3：global vs local thresholds（seed 1）
+
+依使用者最新回報，Stage 1 universal checkpoint 與 Stage 2 全 28 台 ranking evaluation 已在 Hazel
+完成；本機沒有這些真實 artifacts。下方 Stage-1／Stage-2 章節保存當時開發與驗證紀錄。
+Stage 3 的真實 threshold、Raw metrics、runtime、MaxRSS 均待使用者在 Hazel 執行，不能用本機
+synthetic 結果替代。本次沒有 SSH、job submission、commit 或 push。
+
+### Scientific protocol 與實作
+
+本階段只比較 `global / local_05 / local_10 / local_20 / local_full`：同一 seed-1 checkpoint、
+同一 Stage-2 TEST scores／labels／timestamps，只有 threshold 改變。Global 使用全部 28 台 TRAIN
+scores 的自然資料量權重，不 equalize、不 normalize、不平均 thresholds。Local 使用該台 raw
+TRAIN 的 5／10／20% temporal prefix，以及完整 TRAIN 作為 full-local reference。
+`local_full` 不是 few-shot calibration；Universal 也不是 zero-shot。
+
+所有 TRAIN 逐台獨立 windowing 和 frozen inference；不串接 raw machines。只在 scoring 完成後
+concatenate scalar scores 供 global POT 使用。固定 CPU float64、window=10、eval batch=128、seed=1，
+model.eval／requires_grad=False／no_grad，不建立 optimizer、不 backward、不更新參數。
+Stage 3 沒有 raw TEST loader 或 TEST model inference；TEST 入口只讀既有 Stage-2 NPZ。
+
+重用原 `load_frozen_model()`、`windows_for_machine()`、`main.backprop(training=False)`、
+`prefix_length()`、`fit_threshold()`／`fit_source_threshold()`、continuous metrics 和 AUC invariants。
+POT 固定 q=1e-5、requested level=.99995、multiplier=1.06，原 initialization retry 不變；
+每次 fit 依舊 calibration 做法重設 NumPy seed=1，SPOT TEST stream 必須是空的。
+
+舊 `additional_metrics()` 將 Raw／PA payload 綁在一起，且原檔受 checkpoint fingerprints 保護。
+新 Raw-only adapter 保留原 Raw 分支公式、零分母規則與嚴格 `score > threshold`，以對照測試確認
+與原函式 Raw 結果相同；不呼叫 PA，不修改原 scientific core。
+
+Prefix reuse 的依據：window(t) 只取同台 raw[max(0,t-9):t+1] 及左側 padding，與該台的未來 suffix
+無關；frozen TranAD 在不同 windows 間沒有狀態。因此先切 raw prefix 再 windowing，和完整
+windows[:n] 數學上相同。Regression 驗證短 prefix padding 與跨 128-batch 邊界的 scores，
+absolute tolerance=1e-12、rtol=0；不宣稱不同 BLAS batch shape 必然 bitwise 相同。
+真實 smoke 額外執行一次 prefix-first inference，記錄與 full-score prefix 的最大差異，未符合則停止。
+正式 local 條件隨後直接重用完整 TRAIN score 前綴，避免重複 inference。
+
+### 檔案與測試證據
+
+新增：`src/universal_threshold_artifacts.py`（Stage-2 resolver／cache／isolation）、
+`src/universal_thresholding.py`（TRAIN inference／smoke／POT orchestration）、
+`src/universal_threshold_analysis.py`（Raw metrics／aggregation／baseline comparison）、
+`scripts/run_universal_thresholding.py`、`hpc/universal_threshold.sbatch`、
+`tests/test_universal_thresholding.py`。既有程式、Stage-1／Stage-2 及 calibration artifacts 不修改。
+
+本機 17 項新 synthetic tests 通過（最後一次 22.367 秒）。既有 Stage-2 14 項、Stage-1 9 項、seed replication
+12 項、calibration 39 項也通過，合計 91 項。新 orchestration tests 使用明確的 POT stub，另以
+原 fitting adapter 確認 SPOT 收到空 TEST stream、原 q/level/multiplier；不代表真實 POT 已完成。
+涵蓋 140 rows／5 conditions、全部 28 TRAIN streams、自然 weighting、prefix fractions、cache reuse、
+one checkpoint／model freeze、TEST hashes／metrics invariance、Raw equality、無 PA、baseline pairing、
+namespace、不覆寫及失敗拒絕。
+
+可重跑測試（PYTHON_BIN 指向既有本機 CPU environment；本次實際使用 ../TranAD/.venv/bin/python）：
+
+```bash
+export PYTHONDONTWRITEBYTECODE=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg
+export MPLCONFIGDIR="${TMPDIR:-/tmp}/universal-stage3-test-mpl"
+"$PYTHON_BIN" -m unittest discover -s tests -p test_universal_thresholding.py -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_universal_evaluation.py -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_universal_training.py -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_seed_replication.py -v
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_calibration*.py' -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_target_calibration.py -v
+bash -n hpc/universal_threshold.sbatch
+git diff --check
+```
+
+### Hazel 手動執行：先 smoke
+
+使用者完成 code review、commit/push，Hazel 更新後，保留原共同 RESULTS_ROOT：
+
+```bash
+cd "$PROJECT_ROOT"
+git pull
+source hpc/env.sh
+mkdir -p "$RESULTS_ROOT/universal/thresholding/slurm-logs"
+
+"$PYTHON_BIN" scripts/run_universal_thresholding.py --hpc --phase smoke --seed 1 --dry-run
+```
+
+Dry-run 只讀原 artifacts／檔案 hashes，不 model loading／inference／POT／寫結果。
+會解析唯一 completed Stage-1 attempt 與同 checkpoint／evaluation code 的 completed Stage-2 full
+attempt；不使用 latest 或 Stage-2 smoke。多個成功 attempts 時明確 pin，不自動挑模型。
+
+```bash
+UNIVERSAL_THRESHOLD_PHASE=smoke sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/thresholding/slurm-logs/smoke-%j.out" \
+  --error="$RESULTS_ROOT/universal/thresholding/slurm-logs/smoke-%j.err" \
+  hpc/universal_threshold.sbatch
+```
+
+Smoke 只生成 machine-1-1 的 full TRAIN scores，驗證 5% prefix equivalence、fit local_05 POT、
+重用 Stage-2 TEST 算 Raw P/R/F1、確認三個 continuous metrics 與 hashes 不變。
+不以單台 TRAIN 假造 global threshold。
+
+### Smoke review 後，準備 TRAIN scores 與完整 Stage 3
+
+以下 CLI 供已有 compute allocation 時使用，不在 login node inference：
+
+```bash
+# 可選獨立 Phase 1：生成並驗證全部 28 台 TRAIN score caches，不 fit POT。
+"$PYTHON_BIN" -u scripts/run_universal_thresholding.py --hpc --phase train-scores --seed 1
+
+# Smoke 通過且 review 後，完整比較五個條件。
+"$PYTHON_BIN" -u scripts/run_universal_thresholding.py --hpc --phase full --seed 1
+```
+
+也可用同一 Slurm script，與上述 CLI 擇一：
+
+```bash
+# 可選：先做 TRAIN score pool。
+UNIVERSAL_THRESHOLD_PHASE=train-scores sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/thresholding/slurm-logs/train-scores-%j.out" \
+  --error="$RESULTS_ROOT/universal/thresholding/slurm-logs/train-scores-%j.err" hpc/universal_threshold.sbatch
+
+# 僅在 smoke review 與前一 job 結束後手動提交。
+UNIVERSAL_THRESHOLD_PHASE=full sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/thresholding/slurm-logs/full-%j.out" \
+  --error="$RESULTS_ROOT/universal/thresholding/slurm-logs/full-%j.err" hpc/universal_threshold.sbatch
+```
+
+Full 自動重用已驗證的 TRAIN caches（包含 smoke 的 M1）；若未先跑 train-scores，full 會順序生成
+其餘 caches。只保留 scalar TRAIN scores 供 pooled POT，不同時保留 28 個 dense window tensors。
+Full 一個 job 中載入一次 model，做一個 global fit 及 28×4 local fits，共 113 次邏輯 threshold fits；
+各 fit 仍可依原初始化規則 retry。沒有自動 job submission。
+stdout／run.log 會顯示 TRAIN machine/batch 進度、每個 POT fit 開始／完成、initialization attempts
+及逐 target/condition 的 Raw P/R/F1；status.json 會更新 global/local POT phase 與目前 target/condition。
+
+Resource request：csc591f26_cpu／compute_partners／short、1 node、1 task、4 CPUs、8G、2 小時。
+Inference 不需要 gradients/optimizer，memory 小於 universal training；walltime 較 Stage-2 長是因為
+full 包含 113 個 POT fits／retries。這是保守初始 request，不是實測耗時或 MaxRSS。
+
+可選參數與 sbatch 變數：
+
+| CLI | Environment variable |
+| --- | --- |
+| `--stage1-run /實際/attempt` | `UNIVERSAL_STAGE1_RUN` |
+| `--stage2-run /實際/full/attempt` | `UNIVERSAL_STAGE2_RUN` |
+| `--formal-summary /實際/formal_28_machine_results.csv` | `UNIVERSAL_FORMAL_SUMMARY` |
+| `--retry` | `UNIVERSAL_THRESHOLD_RETRY=1` |
+
+### 輸出、immutability 與比較
+
+```text
+RESULTS_ROOT/universal/thresholding/
+├── slurm-logs/
+└── seed1/<checkpoint-sha256>/<stage3-code-sha256>/
+    ├── train_scores/<machine>/attempt-*/
+    │   ├── scores.npz                    # scores、timestamps；無 labels
+    │   ├── metadata.json
+    │   ├── validation.json
+    │   ├── status.json
+    │   └── cache/processed/SMD/
+    ├── smoke/attempt-*/
+    │   ├── smoke_metrics.json
+    │   ├── local_threshold.json
+    │   └── prefix_equivalence.json
+    ├── train-scores/attempt-*/train_score_manifest.csv
+    └── full/attempt-*/
+        ├── launch.json / run.log / status.json
+        ├── global_threshold.json
+        ├── validation.json
+        ├── summary.json
+        ├── targets/<machine>/
+        │   ├── local_*_threshold.json
+        │   ├── *_predictions.npz
+        │   └── threshold_diagnostics.json
+        └── summary/
+            ├── train_score_manifest.csv
+            ├── target_thresholds.csv
+            ├── target_condition_metrics.csv  # 140 rows
+            ├── macro_condition_metrics.csv
+            ├── recovery_statistics.csv
+            ├── group_condition_metrics.csv
+            ├── deployment_comparison.csv
+            ├── per_machine_comparison.csv    # 原 formal baseline 可驗證時
+            └── per_machine_gap_statistics.csv
+```
+
+所有 phases 另有 launch／run.log／status／validation。TRAIN caches 只在 checkpoint、seed、code、
+TRAIN file/array hashes、model state 和 timestamp/counts 都一致時重用。Seed 2/3 不可使用 seed-1 cache。
+成功結果預設拒絕重跑；failed retry 新建 attempt，不改舊檔。殘留 lock/running 要先人工確認 job
+已停止，不自動刪除或回退舊結果。
+
+Stage-1 checkpoint 與 Stage-2 archive／metadata／metrics／validation／summary 全部先記錄 hashes，
+執行後再核對。每 target 的 score／label／timestamp hashes 在五個條件間相同，PR-AUC/AP/ROC-AUC
+與 Stage 2 差異不得超過 1e-12。這不是 ranking improvement，只有 operating point 改變。
+
+Raw F1 recovery 定義為 local Raw F1 減 global Raw F1，四種 local 都報 mean／median 與 improved／
+degraded／unchanged counts，不挑 best fraction、不產生 oracle。Group 1/2/3 只作 descriptive 分組。
+Threshold diagnostics 報 signed／absolute shift、ratio；global 接近 0 時 ratio=null 並記原因，不輸出 NaN/Inf。
+
+預設唯讀核對 RESULTS_ROOT/summaries/formal_28_machine_results.csv 及其原 run metadata/evaluation，
+產生 Per／LOMO／Universal deployment macro P/R/F1，以及每 target×condition 的 Per-minus-Universal
+Raw F1 gap（包含 local_05 和 local_full 的 paired gap/counts）。沒有安全可用 baseline 時明確標示
+comparison unavailable，不 hard-code 或猜補舊 Raw metrics；可用 --formal-summary 指定正確來源。
+LOMO 的 28 models 是研究用 held-out evaluation count，不代表 production 必須部署 28 shared models。
+本次沒有加入 optional LOMO-calibration context，也沒有重跑舊 calibration。
+
+### 完成檢查與停止點
+
+```bash
+squeue -u "$USER"
+tail -f "$RESULTS_ROOT/universal/thresholding/slurm-logs/smoke-JOB_ID.out"
+sacct -j JOB_ID --format=JobID,State,Elapsed,MaxRSS,ExitCode
+cat "$STAGE3_DIR/status.json"
+cat "$STAGE3_DIR/validation.json"
+# smoke：
+cat "$STAGE3_DIR/smoke_metrics.json"
+cat "$STAGE3_DIR/prefix_equivalence.json"
+# full：
+cat "$STAGE3_DIR/global_threshold.json"
+cat "$STAGE3_DIR/summary.json"
+```
+
+將 STAGE3_DIR 設為 stdout 的實際 phase attempt，JOB_ID 換成實際 Slurm ID。summary 的 actual Slurm
+elapsed/MaxRSS 目前為 null；job 完成後由 sacct 取得，提供 review 時附上輸出，不能使用 request 值替代。
+完整成功需 140 rows、28 targets×5 conditions、同一 checkpoint、一個 global scalar、全部 hashes／
+metrics／freeze invariants 通過；baseline comparison 若 unavailable，先補確認來源再做完整解讀。
+**停在 seed-1 Stage 3 review，不自動執行 seeds 2/3、training 或 fine-tuning。**
+
 ## Universal Stage 2：同一 checkpoint 的 continuous-score evaluation
 
 本階段新增獨立入口，只比較 shared representation 的 ranking quality：PR-AUC trapezoidal、
