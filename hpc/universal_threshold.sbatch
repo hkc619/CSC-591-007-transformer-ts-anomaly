@@ -10,6 +10,15 @@
 # 單一 job 順序處理 TRAIN；預設只做 machine-1-1 local_05 smoke，不提交其他 jobs。
 set -euo pipefail
 source "${PROJECT_ROOT:?請設定 PROJECT_ROOT}/hpc/seed_replication_common.sh"
+SEED="${SEED:-1}"
+case "$SEED" in 1|2|3) ;; *) echo "SEED 必須為 1、2 或 3" >&2; exit 2 ;; esac
+export PYTHONHASHSEED="$SEED"
+if [[ "$SEED" != "1" ]]; then
+  args=(--hpc --seed "$SEED" --phase threshold)
+  [[ "${UNIVERSAL_REPLICATION_RETRY:-0}" != "1" ]] || args+=(--retry)
+  "$PYTHON_BIN" -u scripts/run_universal_replication.py "${args[@]}"
+  exit 0
+fi
 export MPLCONFIGDIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/universal-threshold-mpl-${SLURM_JOB_ID:-$$}"
 args=(--hpc --seed 1 --phase "${UNIVERSAL_THRESHOLD_PHASE:-smoke}")
 [[ -z "${UNIVERSAL_STAGE1_RUN:-}" ]] || args+=(--stage1-run "$UNIVERSAL_STAGE1_RUN")

@@ -10,6 +10,15 @@
 # 預設只跑 smoke。full 要由使用者明確指定，且程式會確認 matching smoke 已成功。
 set -euo pipefail
 source "${PROJECT_ROOT:?請先設定 PROJECT_ROOT}/hpc/seed_replication_common.sh"
+SEED="${SEED:-1}"
+case "$SEED" in 1|2|3) ;; *) echo "SEED 必須為 1、2 或 3" >&2; exit 2 ;; esac
+export PYTHONHASHSEED="$SEED"
+if [[ "$SEED" != "1" ]]; then
+  args=(--hpc --seed "$SEED" --phase evaluate)
+  [[ "${UNIVERSAL_REPLICATION_RETRY:-0}" != "1" ]] || args+=(--retry)
+  "$PYTHON_BIN" -u scripts/run_universal_replication.py "${args[@]}"
+  exit 0
+fi
 export MPLCONFIGDIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/tranad-universal-eval-mpl-${SLURM_JOB_ID:-$$}"
 args=(--hpc --seed 1)
 case "${UNIVERSAL_EVAL_MODE:-smoke}" in

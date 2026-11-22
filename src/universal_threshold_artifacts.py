@@ -9,22 +9,30 @@ import numpy as np
 from src.seed_replication import file_hash, read_json, safe_path, unique_name
 from src.target_calibration import array_hash
 from src.universal_evaluation import EVALUATION_SOURCES, evaluation_root, resolve_stage1
-from src.universal_evaluation_analysis import validate_target
+from src.universal_replication_protocol import validate_target, valid_seed
 from src.universal_training import configuration, namespace
 
 CONDITIONS = ("global", "local_05", "local_10", "local_20", "local_full")
 SOURCES = (*EVALUATION_SOURCES, "src/calibration_protocol.py", "src/target_calibration.py",
     "configs/target_calibration.json", "src/universal_threshold_artifacts.py",
-    "src/universal_thresholding.py", "src/universal_threshold_analysis.py", "scripts/run_universal_thresholding.py")
+    "src/universal_thresholding.py", "src/universal_threshold_analysis.py", "scripts/run_universal_thresholding.py",
+    "src/universal_replication_protocol.py", "src/universal_replication.py", "src/universal_replication_analysis.py",
+    "scripts/run_universal_replication.py")
 
 
 def code_hashes(project):
     return {name: file_hash(Path(project) / name) for name in SOURCES}
 
 
-def resolve_inputs(roots, stage1_run=None, stage2_run=None):
-    stage1 = resolve_stage1(roots, stage1_run)
-    parent = evaluation_root(roots.results, stage1) / "full"
+def resolve_inputs(roots, stage1_run=None, stage2_run=None, seed=1):
+    valid_seed(seed)
+    if seed == 1:
+        stage1 = resolve_stage1(roots, stage1_run)
+        parent = evaluation_root(roots.results, stage1) / "full"
+    else:
+        from src.universal_replication_protocol import resolve_training, evaluation_root as seeded_root
+        stage1 = resolve_training(roots, seed, stage1_run)
+        parent = seeded_root(roots.results, stage1) / "full"
     if (parent / "active.lock").exists():
         raise ValueError("Stage 2 仍有 active.lock")
     if stage2_run:
@@ -41,12 +49,12 @@ def resolve_inputs(roots, stage1_run=None, stage2_run=None):
                                  ("status.json", "validation.json", "launch.json")]
     canonical = configuration(roots.project, 1)["sources"]
     if (status.get("state") != "completed" or status.get("completed") is not True
-            or status.get("seed") != 1 or status.get("mode") != "full" or status.get("target_count") != 28
+            or status.get("seed") != seed or status.get("mode") != "full" or status.get("target_count") != 28
             or status.get("validation") != validation or launch.get("stage1") != stage1
             or launch.get("targets") != canonical or launch.get("mode") != "full"
             or validation.get("checkpoint_sha256") != stage1["checkpoint_sha256"]
             or validation.get("unique_universal_checkpoint_hashes") != 1
-            or validation.get("target_count") != 28 or validation.get("seed") != 1
+            or validation.get("target_count") != 28 or validation.get("seed") != seed
             or validation.get("model_retrained") is not False or validation.get("optimizer_steps") != 0
             or not validation.get("parameter_hash_before")
             or validation["parameter_hash_before"] != validation.get("parameter_hash_after")):
@@ -80,9 +88,12 @@ def resolve_inputs(roots, stage1_run=None, stage2_run=None):
     for path in (folder / "summary").iterdir():
         if path.is_file():
             protected[str(safe_path(path))] = file_hash(path)
-    return dict(stage1=stage1, stage2_run=str(folder), stage2_code_sha256=stage1["evaluation_code_sha256"],
+    result = dict(stage1=stage1, stage2_run=str(folder), stage2_code_sha256=stage1["evaluation_code_sha256"],
         checkpoint_sha256=stage1["checkpoint_sha256"], model_state_sha256=validation["parameter_hash_before"],
         targets=canonical, protected_input_sha256=protected)
+    if seed != 1:
+        result.update(seed=seed, stage3_source_file_sha256=code_hashes(roots.project))
+    return result
 
 
 def check_inputs(inputs):
@@ -93,7 +104,7 @@ def check_inputs(inputs):
 
 def root_path(roots, inputs):
     digest = hashlib.sha256(json.dumps(code_hashes(roots.project), sort_keys=True).encode()).hexdigest()
-    return safe_path(namespace(roots.results) / "thresholding/seed1" / inputs["checkpoint_sha256"] / digest)
+    return safe_path(namespace(roots.results) / "thresholding" / f"seed{inputs.get('seed',1)}" / inputs["checkpoint_sha256"] / digest)
 
 
 def claim(parent, retry=False):
@@ -132,7 +143,8 @@ def completed(parent):
 
 def read_train_scores(folder, record, inputs, require_completed=True):
     status, meta, proof = [read_json(folder / name) for name in ("status.json", "metadata.json", "validation.json")]
-    fixed = dict(seed=1, split="train", machine=record["machine"], checkpoint_sha256=inputs["checkpoint_sha256"],
+    seed=inputs.get("seed",1)
+    fixed = dict(seed=seed, split="train", machine=record["machine"], checkpoint_sha256=inputs["checkpoint_sha256"],
                  raw_file_sha256=record["raw_file_sha256"], raw_array_sha256=record["raw_array_sha256"],
                  raw_train_length=record["raw_train_length"], window=10, eval_batch_size=128, dtype="float64", device="cpu")
     expected_state, expected_completed = ("completed", True) if require_completed else ("running", False)
@@ -143,6 +155,8 @@ def read_train_scores(folder, record, inputs, require_completed=True):
             or proof.get("parameter_hash_before") != inputs["model_state_sha256"]
             or proof.get("parameter_hash_after") != inputs["model_state_sha256"]):
         raise ValueError("TRAIN scores 的 source／checkpoint／model freeze metadata 不符")
+    if seed != 1 and meta.get("source_file_sha256") != inputs["stage3_source_file_sha256"]:
+        raise ValueError("TRAIN cache 的 code fingerprint／source hashes 不符")
     path = safe_path(folder / "scores.npz")
     if file_hash(path) != proof["scores_npz_sha256"]:
         raise ValueError("TRAIN scores archive 改變")

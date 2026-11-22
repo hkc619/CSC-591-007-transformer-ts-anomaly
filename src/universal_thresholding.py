@@ -51,6 +51,7 @@ def frozen_scores(core, model, raw):
 
 def obtain_scores(roots, inputs, core, model, record, root, retry):
     from src.calibration_runtime import state_hash
+    seed=inputs.get("seed",1)
     parent = root / "train_scores" / record["machine"]
     existing = completed(parent) if not retry else None
     if retry and parent.exists():
@@ -63,7 +64,7 @@ def obtain_scores(roots, inputs, core, model, record, root, retry):
         return scores, existing
     folder, lock = claim(parent, retry)
     try:
-        update_status(folder, state="running", completed=False, seed=1)
+        update_status(folder, state="running", completed=False, seed=seed)
         import preprocess
         from src.cross_machine import load_training_machine
         previous_output, previous_cache = core.args.output_dir, preprocess.output_folder
@@ -86,22 +87,25 @@ def obtain_scores(roots, inputs, core, model, record, root, retry):
         timestamps = np.arange(len(scores), dtype=np.int64)
         with (folder / "scores.npz").open("xb") as stream:
             np.savez_compressed(stream, scores=scores, timestamps=timestamps)
-        write_json(folder / "metadata.json", dict(seed=1, machine=record["machine"], split="train",
+        metadata = dict(seed=seed, machine=record["machine"], split="train",
             checkpoint_sha256=inputs["checkpoint_sha256"], checkpoint=inputs["stage1"]["checkpoint"],
             raw_file_sha256=record["raw_file_sha256"], raw_array_sha256=record["raw_array_sha256"],
             raw_train_length=len(raw), train_path=record["train_path"], window=10, eval_batch_size=128,
             dtype="float64", device="cpu", scores_array_sha256=array_hash(scores),
             timestamps_array_sha256=array_hash(timestamps), inference_time_sec=seconds,
             prefix_reuse="window(t) only depends on same-machine raw[0:t+1]; eval mode is window-local",
-            git=git_info(roots.project)))
+            git=git_info(roots.project))
+        if seed != 1:
+            metadata["source_file_sha256"]=inputs["stage3_source_file_sha256"]
+        write_json(folder / "metadata.json", metadata)
         write_json(folder / "validation.json", dict(parameters_unchanged=True, parameter_hash_before=before,
             parameter_hash_after=after, all_windows_single_machine=True, optimizer_steps=0,
             model_retrained=False, scores_npz_sha256=file_hash(folder / "scores.npz")))
         read_train_scores(folder, record, inputs, require_completed=False)
-        update_status(folder, state="completed", completed=True, seed=1)
+        update_status(folder, state="completed", completed=True, seed=seed)
         return scores, folder
     except BaseException as error:
-        update_status(folder, state="failed", completed=False, seed=1, error=str(error))
+        update_status(folder, state="failed", completed=False, seed=seed, error=str(error))
         raise
     finally:
         lock.unlink()
@@ -110,7 +114,7 @@ def obtain_scores(roots, inputs, core, model, record, root, retry):
 def fit_train_threshold(core, scores, provenance):
     """這個 API 沒有 TEST/labels 參數，來源必須為已驗證的 TRAIN-score artifact。"""
     from src.calibration_runtime import fit_threshold
-    if (provenance.get("split") != "train" or provenance.get("seed") != 1
+    if (provenance.get("split") != "train" or type(provenance.get("seed")) is not int or provenance.get("seed") not in (1,2,3)
             or provenance.get("score_count") != len(scores) or len(scores) == 0
             or not provenance.get("sources") or len(set(provenance["sources"])) != len(provenance["sources"])
             or scores.ndim != 1 or scores.dtype != np.float64 or not np.isfinite(scores).all()):
@@ -147,15 +151,15 @@ def smoke_gate(root, inputs, hashes):
 
 def execute(roots, phase="smoke", seed=1, stage1_run=None, stage2_run=None, retry=False,
             dry_run=False, formal_summary=None, command=None):
-    if seed != 1 or phase not in ("smoke", "train-scores", "full"):
-        raise ValueError("Stage 3 只接受 seed=1、smoke／train-scores／full")
+    if type(seed) is not int or seed not in (1,2,3) or phase not in ("smoke", "train-scores", "full"):
+        raise ValueError("Stage 3 只接受 seeds=1,2,3、smoke／train-scores／full")
     load_configuration(roots.project)  # 核對既有固定 fractions／POT／protocol，不修改舊設定。
-    inputs = resolve_inputs(roots, stage1_run, stage2_run)
+    inputs = resolve_inputs(roots, stage1_run, stage2_run, seed=seed)
     hashes = code_hashes(roots.project)
     root = root_path(roots, inputs)
     targets = inputs["targets"][:1] if phase == "smoke" else inputs["targets"]
     records = inspect_train(roots, inputs, targets)
-    description = dict(experiment="universal_thresholding_v1", phase=phase, seed=1, inputs=inputs,
+    description = dict(experiment="universal_thresholding_v1", phase=phase, seed=seed, inputs=inputs,
         sources=targets, train_records=records, source_file_sha256=hashes, conditions=list(CONDITIONS),
         window=10, eval_batch_size=128, dtype="float64", device="cpu", output_root=str(root),
         test_inference_executed=False, model_retrained=False, optimizer_steps=0)
@@ -167,7 +171,7 @@ def execute(roots, phase="smoke", seed=1, stage1_run=None, stage2_run=None, retr
         description["completed_smoke"] = smoke_gate(root, inputs, hashes)
     folder, lock = claim(root / phase, retry)
     try:
-        update_status(folder, state="running", completed=False, seed=1, phase=phase)
+        update_status(folder, state="running", completed=False, seed=seed, phase=phase)
         write_json(folder / "launch.json", dict(description, command=command or [sys.executable, *sys.argv]))
         print(f"Stage-3 directory: {folder}", flush=True)
         with (folder / "run.log").open("x") as log:
@@ -181,10 +185,10 @@ def execute(roots, phase="smoke", seed=1, stage1_run=None, stage2_run=None, retr
             raise ValueError("Stage-3 implementation 在執行期間改變")
         check_inputs(inputs)
         write_json(folder / "validation.json", validation)
-        update_status(folder, state="completed", completed=True, seed=1, phase=phase)
+        update_status(folder, state="completed", completed=True, seed=seed, phase=phase)
         return folder
     except BaseException as error:
-        update_status(folder, state="failed", completed=False, seed=1, error=f"{type(error).__name__}: {error}")
+        update_status(folder, state="failed", completed=False, seed=seed, error=f"{type(error).__name__}: {error}")
         raise
     finally:
         lock.unlink()
@@ -193,12 +197,13 @@ def execute(roots, phase="smoke", seed=1, stage1_run=None, stage2_run=None, retr
 def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
     import torch
     from src.calibration_runtime import load_frozen_model, score_prefix, state_hash
-    args = core_args(roots, configuration(roots.project, 1), folder, Path(inputs["stage1"]["checkpoint"]))
+    seed=inputs.get("seed",1)
+    args = core_args(roots, configuration(roots.project, seed), folder, Path(inputs["stage1"]["checkpoint"]))
     args.retrain, args.checkpoint = False, inputs["stage1"]["checkpoint"]
     core = import_core(args)
-    random.seed(1)
-    np.random.seed(1)
-    torch.manual_seed(1)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     model, before = load_frozen_model(core, inputs["stage1"]["checkpoint"])
     if before != inputs["model_state_sha256"]:
         raise ValueError("Model state 與 Stage 2 不同")
@@ -207,13 +212,13 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
     for index, record in enumerate(records):
         target = record["machine"]
         print(f"[{index+1}/{len(records)}] TRAIN only：{target}", flush=True)
-        update_status(folder, state="running", completed=False, seed=1, phase="train_scoring", machine=target)
+        update_status(folder, state="running", completed=False, seed=seed, phase="train_scoring", machine=target)
         scores, source = obtain_scores(roots, inputs, core, model, record, root, retry)
         pools[target] = scores
         manifest.append(dict(machine=target, raw_train_length=len(scores), score_count=len(scores),
             scores_path=str(source / "scores.npz"), scores_npz_sha256=file_hash(source / "scores.npz"),
             scores_array_sha256=array_hash(scores), timestamps_array_sha256=array_hash(np.arange(len(scores), dtype=np.int64)),
-            checkpoint_sha256=inputs["checkpoint_sha256"], seed=1))
+            checkpoint_sha256=inputs["checkpoint_sha256"], seed=seed))
     equivalent = None
     if phase == "smoke":
         record = records[0]
@@ -224,7 +229,7 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
         np.testing.assert_allclose(pools[target][:length], separately_scored, rtol=0, atol=1e-12)
         equivalent = dict(raw_prefix_points=length, max_absolute_difference=float(np.max(np.abs(pools[target][:length]-separately_scored))),
                           tolerance=1e-12, prefix_first_equals_full_score_prefix=True)
-        info = fit_train_threshold(core, pools[target][:length], dict(split="train", seed=1, sources=[target],
+        info = fit_train_threshold(core, pools[target][:length], dict(split="train", seed=seed, sources=[target],
             score_count=length, raw_prefix_start=0, raw_prefix_stop_exclusive=length, condition="local_05"))
         row, predictions = target_row(inputs, target, "local_05", info["threshold"])
         write_json(folder / "local_threshold.json", info)
@@ -235,9 +240,9 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
         if len(pools) != 28 or list(pools) != inputs["targets"]:
             raise ValueError("Global pool 必須包含全部 28 TRAIN machines")
         pooled = np.concatenate([pools[t] for t in inputs["targets"]])
-        provenance = dict(split="train", seed=1, sources=inputs["targets"], score_count=len(pooled),
+        provenance = dict(split="train", seed=seed, sources=inputs["targets"], score_count=len(pooled),
             condition="global", score_array_sha256=array_hash(pooled), train_score_manifest=manifest)
-        update_status(folder, state="running", completed=False, seed=1, phase="global_pot_fit")
+        update_status(folder, state="running", completed=False, seed=seed, phase="global_pot_fit")
         global_info = fit_train_threshold(core, pooled, provenance)
         global_info["checkpoint_sha256"] = inputs["checkpoint_sha256"]
         write_json(folder / "global_threshold.json", global_info)
@@ -247,9 +252,9 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
             values = {"global": global_info["threshold"]}
             for condition in CONDITIONS[1:]:
                 length = len(pools[target]) if condition == "local_full" else prefix_length(len(pools[target]), FRACTIONS[condition])
-                update_status(folder, state="running", completed=False, seed=1, phase="local_pot_fit",
+                update_status(folder, state="running", completed=False, seed=seed, phase="local_pot_fit",
                               target=target, target_index=target_index+1, condition=condition)
-                info = fit_train_threshold(core, pools[target][:length], dict(split="train", seed=1, sources=[target],
+                info = fit_train_threshold(core, pools[target][:length], dict(split="train", seed=seed, sources=[target],
                     score_count=length, raw_prefix_start=0, raw_prefix_stop_exclusive=length, condition=condition,
                     full_train_score_sha256=array_hash(pools[target]), calibration_score_sha256=array_hash(pools[target][:length])))
                 values[condition] = info["threshold"]
@@ -270,7 +275,7 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
                 with (folder / "targets" / target / (condition+"_predictions.npz")).open("xb") as stream:
                     np.savez_compressed(stream, predictions=predictions)
             write_json(folder / "targets" / target / "threshold_diagnostics.json", diagnostics)
-            thresholds.append(dict(target=target, group=int(target.split("-")[1]), seed=1,
+            thresholds.append(dict(target=target, group=int(target.split("-")[1]), seed=seed,
                 **{c+"_threshold": values[c] for c in CONDITIONS}))
         summarize(roots, inputs, folder, rows, thresholds, manifest, formal_summary)
     else:
@@ -284,7 +289,7 @@ def run(roots, inputs, records, root, folder, phase, retry, formal_summary):
         if file_hash(record["train_path"]) != record["raw_file_sha256"]:
             raise ValueError("TRAIN file 在 Stage 3 改變")
     check_inputs(inputs)
-    return dict(seed=1, phase=phase, parameters_unchanged=True, parameter_hash_before=before,
+    return dict(seed=seed, phase=phase, parameters_unchanged=True, parameter_hash_before=before,
         parameter_hash_after=after, checkpoint_sha256=inputs["checkpoint_sha256"],
         unique_universal_checkpoint_hashes=1, optimizer_steps=0, model_retrained=False,
         test_inference_executed=False, stage2_inputs_unchanged=True, test_scores_reused=True,

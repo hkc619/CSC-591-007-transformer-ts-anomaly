@@ -34,7 +34,7 @@ def target_row(inputs, target, condition, threshold):
     check_auc_invariance({"continuous_score": original}, {"continuous_score": continuous}, 1e-12)
     raw, predictions = raw_metrics(scores, labels, threshold)
     meta = read_json(Path(inputs["stage2_run"]) / "targets" / target / "metadata.json")
-    return dict(target=target, group=int(target.split("-")[1]), seed=1, condition=condition,
+    return dict(target=target, group=int(target.split("-")[1]), seed=inputs.get("seed",1), condition=condition,
         threshold=float(threshold), raw_precision=raw["precision"], raw_recall=raw["recall"], raw_f1=raw["f1"],
         tp=raw["TP"], tn=raw["TN"], fp=raw["FP"], fn=raw["FN"],
         pr_auc=continuous["pr_auc_trapezoidal"], average_precision=continuous["average_precision"],
@@ -46,10 +46,11 @@ def target_row(inputs, target, condition, threshold):
 
 def validate_rows(rows, targets, checkpoint_sha256):
     expected = {(m, c) for m in targets for c in CONDITIONS}
-    if (len(targets) != 28 or len(set(targets)) != 28 or len(rows) != 140
+    seed=rows[0]["seed"] if rows else None
+    if (type(seed) is not int or seed not in (1,2,3) or len(targets) != 28 or len(set(targets)) != 28 or len(rows) != 140
             or {(r["target"], r["condition"]) for r in rows} != expected
-            or any(r["seed"] != 1 or r["checkpoint_sha256"] != checkpoint_sha256 for r in rows)):
-        raise ValueError("Stage 3 必須恰為 28 targets × 5 conditions、seed=1、同一 checkpoint")
+            or any(r["seed"] != seed or r["checkpoint_sha256"] != checkpoint_sha256 for r in rows)):
+        raise ValueError("Stage 3 必須恰為 28 targets × 5 conditions、同一 seed（1/2/3）及 checkpoint")
     global_values = {r["threshold"] for r in rows if r["condition"] == "global"}
     if len(global_values) != 1:
         raise ValueError("Global threshold 必須為所有 targets 共用的一個 scalar")
@@ -65,6 +66,7 @@ def validate_rows(rows, targets, checkpoint_sha256):
 
 def aggregate(rows, targets):
     validate_rows(rows, targets, rows[0]["checkpoint_sha256"])
+    seed=rows[0]["seed"]
     baseline = {r["target"]: r for r in rows if r["condition"] == "global"}
     macros, recovery, groups = [], [], []
     for condition in CONDITIONS:
@@ -73,16 +75,16 @@ def aggregate(rows, targets):
         deltas = [r["raw_f1"]-baseline[r["target"]]["raw_f1"] for r in records]
         counts = dict(improved_vs_global=sum(d > 0 for d in deltas), degraded_vs_global=sum(d < 0 for d in deltas),
                       unchanged_vs_global=sum(d == 0 for d in deltas))
-        macros.append(dict(condition=condition, seed=1, mean_raw_precision=float(np.mean([r["raw_precision"] for r in records])),
+        macros.append(dict(condition=condition, seed=seed, mean_raw_precision=float(np.mean([r["raw_precision"] for r in records])),
             mean_raw_recall=float(np.mean([r["raw_recall"] for r in records])), mean_raw_f1=float(np.mean(values)),
             median_raw_f1=float(np.median(values)), sample_std_raw_f1=float(np.std(values, ddof=1)),
             **{k: (None if condition == "global" else v) for k, v in counts.items()}))
         if condition != "global":
-            recovery.append(dict(condition=condition, seed=1, mean_recovery=float(np.mean(deltas)),
+            recovery.append(dict(condition=condition, seed=seed, mean_recovery=float(np.mean(deltas)),
                 median_recovery=float(np.median(deltas)), **counts))
         for group in (1, 2, 3):
             subset = [r for r in records if r["group"] == group]
-            groups.append(dict(condition=condition, group=group, seed=1, target_count=len(subset),
+            groups.append(dict(condition=condition, group=group, seed=seed, target_count=len(subset),
                 mean_raw_precision=float(np.mean([r["raw_precision"] for r in subset])),
                 mean_raw_recall=float(np.mean([r["raw_recall"] for r in subset])),
                 mean_raw_f1=float(np.mean([r["raw_f1"] for r in subset])),
@@ -91,6 +93,9 @@ def aggregate(rows, targets):
 
 
 def comparisons(roots, inputs, rows, path):
+    if inputs.get("seed",1) != 1:
+        from src.universal_replication import threshold_comparisons
+        return threshold_comparisons(roots,inputs,rows)
     target_folders = {t: Path(inputs["stage2_run"]) / "targets" / t for t in inputs["targets"]}
     from src.universal_evaluation_analysis import validate_target
     ranking_rows = [validate_target(target_folders[t], t, inputs["stage1"]) for t in inputs["targets"]]
@@ -125,6 +130,7 @@ def comparisons(roots, inputs, rows, path):
 
 
 def summarize(roots, inputs, folder, rows, thresholds, train_manifest, formal_summary=None):
+    seed=inputs.get("seed",1)
     macros, recovery, groups = aggregate(rows, inputs["targets"])
     outputs = folder / "summary"
     outputs.mkdir(exist_ok=False)
@@ -132,19 +138,19 @@ def summarize(roots, inputs, folder, rows, thresholds, train_manifest, formal_su
                         ("train_score_manifest.csv", train_manifest), ("macro_condition_metrics.csv", macros),
                         ("recovery_statistics.csv", recovery), ("group_condition_metrics.csv", groups)):
         write_csv(outputs / name, table)
-    deployments = [dict(deployment="universal", models=1, threshold_type=r["condition"], seed=1,
+    deployments = [dict(deployment="universal", models=1, threshold_type=r["condition"], seed=seed,
         mean_raw_precision=r["mean_raw_precision"], mean_raw_recall=r["mean_raw_recall"], mean_raw_f1=r["mean_raw_f1"])
         for r in macros]
     candidate = Path(formal_summary) if formal_summary else roots.results / "summaries/formal_28_machine_results.csv"
     comparison_status, protected = "unavailable", {}
-    if formal_summary or candidate.exists():
+    if seed != 1 or formal_summary or candidate.exists():
         paired, gaps, reference, protected = comparisons(roots, inputs, rows, candidate)
         write_csv(outputs / "per_machine_comparison.csv", paired)
         write_csv(outputs / "per_machine_gap_statistics.csv", gaps)
         deployments = reference + deployments
-        comparison_status = "validated_seed1_artifacts"
+        comparison_status = "validated_seed1_artifacts" if seed==1 else "validated_matching_seed_artifacts"
     write_csv(outputs / "deployment_comparison.csv", deployments)
-    summary = dict(seed=1, target_count=28, condition_count=5, result_rows=140, conditions=list(CONDITIONS),
+    summary = dict(seed=seed, target_count=28, condition_count=5, result_rows=140, conditions=list(CONDITIONS),
         unique_universal_checkpoint_hashes=1, checkpoint_sha256=inputs["checkpoint_sha256"],
         stage2_run=inputs["stage2_run"], stage2_code_sha256=inputs["stage2_code_sha256"],
         model_retrained=False, optimizer_steps=0, test_inference_executed=False, test_scores_reused=True,

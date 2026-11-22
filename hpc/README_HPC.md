@@ -1,5 +1,204 @@
 # Hazel / Slurm 手動部署
 
+## Universal replication：seeds 2／3（最新 workflow）
+
+使用者已回報 seed-1 Universal Stage 1–3 完成；本節只準備同 protocol 的 seeds 2／3 replication。
+沒有執行真實 seeds 2/3 training、evaluation、POT 或 Hazel job，沒有 commit/push。
+本機測試只使用 synthetic data、random model/schema fixtures 與 stub POT，不代表新研究結果。
+
+### 唯一 experimental variable 與相容性
+
+Model training seed 為 2 或 3。其他條件完全相同：TranAD/SMD、全部 canonical 28 TRAIN、5 epochs、
+train/eval batch 128、window 10、lr=1e-4、CPU float64、原 AdamW/StepLR/loss、逐 machine windowing、
+natural source-size weighting、deterministic seeded shuffle、原 preprocessing/labels/score/checkpoint 格式。
+沒有 normalization、balancing、額外 budget、TEST-based selection 或新模型。
+
+POT q=1e-5、requested level=.99995、multiplier=1.06、原 initialization retries、empty TEST stream 不變。
+**POT RNG 依凍結的 seed-1 protocol，每次 fit 仍為 1**；不把模型 seed 2/3 當成 POT RNG。
+五個條件 `global / local_05 / local_10 / local_20 / local_full` 全部保留，每 seed 恰為 140 rows。
+有限極端 thresholds 保留原值，不 clip、不刪 target、不改 POT/fraction，也不挑最佳 fraction。
+
+舊 seed-1 source fingerprints 包含原 evaluation entrypoint；直接修改它會使已完成 artifacts 的自動
+定位失效。因此保留 `src/universal_training.py`、`src/universal_evaluation.py`、
+`src/universal_evaluation_analysis.py` 和原 Python CLI 逐字不變。
+Seeds 2/3 改用共用 replication I/O adapter，重用原 model、TEST loader、window validator、frozen inference、
+continuous metrics、Stage-3 orchestration／POT／Raw metrics。沒有另外實作 seed-specific model/loss/scoring。
+原 Stage-3 functions 的 seed 身分／metadata／path 參數化，seed=1 預設仍維持原數值行為。
+
+`configs/universal_seed1_compatibility.json` 保存凍結 commit `9982b1b56386b3c0f9ab98edd0fe99ec1f3421fd`
+的 Stage-3 source map／code SHA256，供唯讀解析歷史 seed-1 namespace；未知 fingerprints 直接失敗。
+不改寫 seed-1 artifacts 或改填新 code hash。原 seed-1 Python CLI 仍保留只接受 seed 1 的 evaluation/
+threshold 安全介面；seeds 2/3 透過 `scripts/run_universal_replication.py` 與新的 Slurm routing 執行。
+不支援的 seeds 一律拒絕。
+
+### Gates、matching-seed references 與 caches
+
+同 seed Stage 1 completed 才能 evaluation；同 seed Stage-2 full completed 才能 thresholding。
+新 evaluate/threshold phases 各自在 fresh subprocess 依序執行 smoke → full，保留原 smoke gates；
+已 completed 的同 phase 不覆寫，會重新核對其 artifacts。失敗重試需 `--retry` 或
+`UNIVERSAL_REPLICATION_RETRY=1`，保留舊 attempts。不同 phases 不要同時操作相同 caches。
+
+每 seed 的 28 TEST targets 共用一份 checkpoint，unique checkpoint SHA256 count=1。
+Stage 3 不重新 TEST inference，只讀同 seed Stage-2 scores/labels/timestamps；TRAIN caches 同時核對
+seed、checkpoint SHA256、model-state hash、TRAIN file/array hashes、code fingerprint/source hashes。
+跨 seed cache／checkpoint／TEST artifact 不能互換。
+
+Per-machine/LOMO 參考資料由 canonical `seed_replication_runs.csv`、同 seed task parent、唯一成功
+attempt、worker args、metadata/source snapshots 定位；核對 protocol、TRAIN hashes/windows、TEST 與
+interpretation-label hashes。不回退 seed 1，也不靠一個未驗證的 CSV 借用其他 seed 的結果。
+缺 matching formal artifacts 會停止 comparison，而不是偷偷填 seed-1 baseline。
+
+### 先 Seed 2 plan／dry-run
+
+使用者 review/commit/push、Hazel 更新後，沿用既有 CPU environment：
+
+```bash
+cd "$PROJECT_ROOT"
+git pull
+source hpc/env.sh
+mkdir -p "$RESULTS_ROOT/universal/replication-logs"
+
+# 不需要 checkpoint，檢查全部 28 TRAIN、固定 protocol 與各 seed namespaces。
+"$PYTHON_BIN" scripts/run_universal_replication.py --hpc --seed 2 --phase plan
+# 等價的 Stage-1 training preflight：
+"$PYTHON_BIN" scripts/run_universal_replication.py --hpc --seed 2 --phase train --dry-run
+```
+
+Plan 中尚未產生的 checkpoint/code hash 用 placeholder，不能當成已存在 artifact。
+Stage-2/3 dry-run 僅能在各自 dependency 完成後使用，缺 checkpoint/full evaluation 時直接失敗。
+不載入 model、不 inference、不 fit POT、不建立結果。
+
+### Seed 2：分階段手動提交
+
+每個 job 完成並檢查 status/validation 後，才提交下一個；以下沒有自動 dependency submission：
+
+```bash
+SEED=2 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed2-train-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed2-train-%j.err" hpc/universal_train.sbatch
+
+# Stage 1 成功後先確認：
+"$PYTHON_BIN" scripts/run_universal_replication.py --hpc --seed 2 --phase evaluate --dry-run
+SEED=2 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed2-evaluate-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed2-evaluate-%j.err" hpc/universal_evaluate.sbatch
+
+# Stage 2 full 成功後先確認：
+"$PYTHON_BIN" scripts/run_universal_replication.py --hpc --seed 2 --phase threshold --dry-run
+SEED=2 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed2-threshold-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed2-threshold-%j.err" hpc/universal_threshold.sbatch
+```
+
+如已在 compute allocation，可與 sbatch 擇一使用：
+
+```bash
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 2 --phase train
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 2 --phase evaluate
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 2 --phase threshold
+```
+
+### Seed 2 review 後才 Seed 3
+
+先確認 seed-2 的 checkpoint/TEST/TRAIN cache seed identities、one-checkpoint、140 rows、empty POT stream、
+model/test/continuous-metric invariants 全部成立。不要因數值高低修改 seed-3 protocol。
+若發現真正 protocol bug，先停止釐清；不只修後面 seed。不要同時提交 seeds 2/3。
+
+```bash
+"$PYTHON_BIN" scripts/run_universal_replication.py --hpc --seed 3 --phase plan
+SEED=3 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed3-train-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed3-train-%j.err" hpc/universal_train.sbatch
+
+# Seed-3 Stage 1 完成後：
+SEED=3 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed3-evaluate-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed3-evaluate-%j.err" hpc/universal_evaluate.sbatch
+
+# Seed-3 Stage 2 full 完成後：
+SEED=3 sbatch --chdir="$PROJECT_ROOT" \
+  --output="$RESULTS_ROOT/universal/replication-logs/seed3-threshold-%j.out" \
+  --error="$RESULTS_ROOT/universal/replication-logs/seed3-threshold-%j.err" hpc/universal_threshold.sbatch
+```
+
+對應 compute-allocation CLI：
+
+```bash
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 3 --phase train
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 3 --phase evaluate
+"$PYTHON_BIN" -u scripts/run_universal_replication.py --hpc --seed 3 --phase threshold
+```
+
+對 seeds 2/3，evaluation/threshold sbatch 會 route 到新 wrapper，自動做該 phase 的 smoke/full；
+舊 `UNIVERSAL_EVAL_MODE`／`UNIVERSAL_THRESHOLD_PHASE` 只適用 seed-1 分支，不控制新 wrapper。
+資源不變：train=4 CPUs/16G/2h；evaluate=4 CPUs/8G/30min；threshold=4 CPUs/8G/2h，
+同 `csc591f26_cpu / compute_partners / short`。Actual cost 未測量，job 後讀 accounting：
+
+```bash
+sacct -j JOB_ID --format=JobID,State,Elapsed,MaxRSS,ExitCode
+```
+
+### 每 seed 的 artifacts
+
+```text
+RESULTS_ROOT/universal/
+├── runs/universal_TranAD_SMD_v2_e5_bs128_seed{2,3}/attempt-*/
+├── checkpoints/universal_TranAD_SMD_v2_e5_bs128_seed{2,3}/attempt-*/model.ckpt
+├── evaluation/seed{2,3}/<checkpoint-sha256>/<evaluation-code-sha256>/{smoke,full}/attempt-*/
+├── thresholding/seed{2,3}/<checkpoint-sha256>/<stage3-code-sha256>/
+│   ├── train_scores/<machine>/attempt-*/
+│   └── {smoke,full}/attempt-*/
+└── multiseed/analysis-<timestamp>-<uuid>/
+```
+
+新 Stage-2 full 保存 `summary/target_metrics.csv`、`summary/summary.json`、
+`summary/matching_seed_comparison.csv`；不把 seed-2/3 table 誤命名為 seed1_comparison。
+Stage-3 schema 沿用原版，每 seed 140 rows，新 seeds 合計 280 rows；保留全部 threshold conditions。
+
+### 三 seed aggregation：完成後才執行
+
+```bash
+"$PYTHON_BIN" scripts/analyze_universal_replication.py --hpc
+```
+
+如果 seed 1 有多個歷史成功 code namespaces，先人工確認，再加
+`--seed1-threshold-run /實際/seed1/full/attempt`，不自行挑 latest。
+Aggregation 全面核對 completed artifacts、cache provenance、score/label/hash、Raw/continuous metrics、
+全域自然 score pool、prefix counts、matching formal references，以及三個 Universal seeds 相同的
+TRAIN/TEST/labels/environment。只讀 individual seeds，不重算 TEST inference 或 POT。
+
+輸出另外存至 `universal/multiseed/analysis-*`：
+
+- `ranking_by_seed.csv`：三個 settings × 三個 seed 的 macro PR-AUC。
+- `threshold_by_seed.csv`：五種 Universal conditions 與 Per-machine 的各 seed macro Raw P/R/F1。
+- `multiseed_ranking_summary.csv`、`multiseed_threshold_summary.csv`：seed1/2/3、mean、sample std、seed_count=3。
+- `seed_level_gaps.csv`、`multiseed_gap_summary.csv`：六種預先定義的 paired seed-level gaps。
+- `machine_direction_consistency.csv`：每台 ranking/local recovery 的三 seed 方向、ties、真正正負翻轉旗標。
+- `multiseed_summary.json`：input SHA256、direction counts、aggregation 定義；不聲稱 statistical significance。
+
+一定先每 seed 對 28 targets macro，再對三個 seed-level means 做 mean ± sample std（ddof=1）。
+不能把 84 machine-seed observations 當成 84 seeds；machine consistency 只是 descriptive。
+
+### 本機驗證與停止點
+
+原 Universal 40 項 tests 保持 assertions 原樣；seed replication 12 項、calibration 39 項亦已通過。
+新增 replication 13 項 tests 通過，合計 104 項。Seed-2 真實 TRAIN-only plan 確認 28 台、708405 windows，
+只讀資料，沒有訓練。新 tests 驗證 seeds/configs、cross-seed 拒絕、舊 seed-1 namespace 唯讀解析、140 rows、extreme finite
+threshold 不 clipping、seed-level ddof=1、方向一致性，以及凍結數值函式/POT RNG 的 AST 對照。
+Synthetic model fixtures 不代表已訓練 seed-2/3 model；stub POT 不代表真實 thresholds。
+
+```bash
+export PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MPLBACKEND=Agg
+export MPLCONFIGDIR="${TMPDIR:-/tmp}/universal-replication-tests-mpl"
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_universal*.py' -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_seed_replication.py -v
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_calibration*.py' -v
+"$PYTHON_BIN" -m unittest discover -s tests -p test_target_calibration.py -v
+```
+
+目前停止於 replication workflow/code review；不自動執行真實實驗、submit、SSH 或 push，
+不根據 seed-2/3 outcomes 修改科學設定，也不擴展到更多 seeds 或新 architecture。
+
 ## Universal Stage 3：global vs local thresholds（seed 1）
 
 依使用者最新回報，Stage 1 universal checkpoint 與 Stage 2 全 28 台 ranking evaluation 已在 Hazel

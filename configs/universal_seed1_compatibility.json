@@ -1,0 +1,33 @@
+{
+  "seed1_freeze_commit": "9982b1b56386b3c0f9ab98edd0fe99ec1f3421fd",
+  "stage3_code_sha256": "e38541a5bd1dec710031e533f2fefaca91b2e3a9f8fa6cd5d9a83eebc214f080",
+  "source_file_sha256": {
+    "main.py": "fa221611498e41f0a36f11ec4142797daf72974d6f378dede5b7e871bfdb0f81",
+    "preprocess.py": "92bb0f179edcf0f6ead0d224dea4fde16ce5364fc89a5cd882d43aef3e446d1a",
+    "src/models.py": "42e8bdfa4ef1dced1683964f1f40712e70587d5b22ea2e7626e622d68932d314",
+    "src/dlutils.py": "82feb2d5457cc4d197b1f5f8db70cb212b6a32c99d0c2cbda1229d720c1cb6eb",
+    "src/constants.py": "00f710d5ae8a4a5f14b9153abe6833f4eece52d8462d25522cfb8ebcf99735dc",
+    "src/pot.py": "83fd5dbd6e5c9f50840dc3ef891552c5bcf3691f403e294819260850c92bed46",
+    "src/spot.py": "7d68506d28421da21247e6ac76e9684ed1a687820426695fe3016416b68035bb",
+    "src/training_protocol.py": "4e44cd24902b8931443aae3f4b3619afc4c4264a92a7075bede8eb651c64b973",
+    "src/cross_machine.py": "6d22e4a3a7cb1a78ba9fb90f6fb8162365291340480425de34912efa74b6cb3c",
+    "src/experiment.py": "9de7a887ad4275da8ef51d4107f06ea4df729b3c7e3ff78ed60f0c5c0e042f58",
+    "src/parser.py": "741cfadb99fcdc6347ffefa69b8ae7e6b1d4dc959e9cdc51c67ccb40eaa6c22c",
+    "src/deployment.py": "70ad15e46a46907667f5b409b15e9377478392772159f18f89fa56a7836e06ec",
+    "src/calibration_runtime.py": "71cdac7bb987eed0bfdad1d7f9df780b3f17834ef450f1ea500c7521d350885c",
+    "src/continuous_metrics.py": "100df2f87d17b235e4fce9644f54593560515592bcd87eea11c51f050842439a",
+    "src/universal_training.py": "54010a0ffa5ca05390c9d7c14c90eb201660f8dc83b0d0c14aca44fbc6261963",
+    "src/universal_evaluation.py": "a7848a8f8bcd0904ea31d5c17f0ecbf8a536d494b77dc47126d7418c01e7e71f",
+    "src/universal_evaluation_analysis.py": "b7bfb100da79649d5095ed8b62c1a497168187395de1722743fa79b396331e97",
+    "scripts/run_universal_evaluation.py": "bd900d35e9572a0841f92eb0888bfbdaaa85a724d9dfd5c084f4f637a1516752",
+    "configs/formal_protocol_v2.json": "7be43fcdd44b98bdccfb13c270ca6e0526780cc07a4c7a913c87ebb7a96e5c4f",
+    "configs/universal_training.json": "2b1b6ff41f92f54cdde00f54d39f28d549a5be467c1c41e27550c3d0a60c31d9",
+    "src/calibration_protocol.py": "ed0e0ce71b8b1340f50c8388ad4b402acf0c4a405c55a7f3703942aff639f6af",
+    "src/target_calibration.py": "303e9cfb63c415f0430d3406f5b15c2374c20a3aa23490afeeb3d92016de147d",
+    "configs/target_calibration.json": "abb8ade1b6541384beb334ec1db7ce5dc408415777dd3e32f8f21483bbf10a84",
+    "src/universal_threshold_artifacts.py": "3de7d5d0f50868cc5a1c876732938ca4de97a348335d5989f331b2a7b2ef82ac",
+    "src/universal_thresholding.py": "fd11375801767ae6980e245aad9414f89e638d6acae41a060a298cd81dc18135",
+    "src/universal_threshold_analysis.py": "8890f78596058293b226ad04933302eef87af1230859ca02d53f94b173951e6d",
+    "scripts/run_universal_thresholding.py": "8c8a94c7061b93dcd0b854b622d58f62e931f0a055333d485fc1095440c3c1c9"
+  }
+}
